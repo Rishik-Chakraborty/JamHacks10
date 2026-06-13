@@ -328,35 +328,26 @@ export interface ChallengeTemplate {
 }
 
 export const CHALLENGE_TEMPLATES: ChallengeTemplate[] = [
+  // --- Calisthenics holds & skills: high dazzle, near-binary to judge --------
   {
-    id: 'deadlift',
-    label: 'Deadlift a target weight',
-    unit: 'kg',
-    valuePrompt: 'Target weight (kg)',
-    titleTemplate: 'Deadlift {value} kg',
-    goalTemplate: 'Pull a {value} kg deadlift for a clean single rep before the deadline.',
+    id: 'handstand',
+    label: 'Freestanding handstand hold',
+    unit: 'sec',
+    valuePrompt: 'Hold duration (seconds)',
+    titleTemplate: 'Freestanding handstand for {value}s',
+    goalTemplate: 'Balance a freestanding handstand for {value} seconds before the deadline.',
     criteriaTemplate:
-      'A video shows one full deadlift rep — bar lifted from the floor to lockout (hips and knees extended) — with plates whose visible markings sum to {value} kg (including the bar).',
+      'A single continuous video shows a freestanding handstand — both feet clearly away from any wall or support — held for at least {value} seconds, with a visible running timer or stopwatch in frame.',
   },
   {
-    id: 'bench',
-    label: 'Bench press a target weight',
-    unit: 'kg',
-    valuePrompt: 'Target weight (kg)',
-    titleTemplate: 'Bench press {value} kg',
-    goalTemplate: 'Bench press {value} kg for a full rep before the deadline.',
+    id: 'muscleup',
+    label: 'Strict bar muscle-ups',
+    unit: 'reps',
+    valuePrompt: 'Number of reps',
+    titleTemplate: '{value} strict bar muscle-up(s)',
+    goalTemplate: 'Perform {value} strict bar muscle-up(s) before the deadline.',
     criteriaTemplate:
-      'A video shows one full bench-press rep (bar lowered to the chest then pressed to locked-out arms) with plates whose visible markings sum to {value} kg including the bar.',
-  },
-  {
-    id: 'squat',
-    label: 'Squat a target weight',
-    unit: 'kg',
-    valuePrompt: 'Target weight (kg)',
-    titleTemplate: 'Squat {value} kg',
-    goalTemplate: 'Squat {value} kg to at least parallel for one rep before the deadline.',
-    criteriaTemplate:
-      'A video shows one full back-squat rep descending to at least parallel (hip crease below the top of the knee) and standing back up, with plates summing to {value} kg including the bar.',
+      'A single continuous video shows {value} strict bar muscle-up rep(s): each starting from a dead hang and finishing with the arms locked out and the torso above the bar, with no kipping or leg swing.',
   },
   {
     id: 'pullups',
@@ -379,34 +370,79 @@ export const CHALLENGE_TEMPLATES: ChallengeTemplate[] = [
       'A single continuous video shows {value} consecutive push-ups, each lowering until the chest is near the floor (elbows ~90°) and pressing back to locked-out arms, without resting on the floor between reps.',
   },
   {
-    id: 'run',
-    label: 'Run a distance',
-    unit: 'km',
-    valuePrompt: 'Distance (km)',
-    titleTemplate: 'Run {value} km',
-    goalTemplate: 'Run {value} km in a single continuous effort before the deadline.',
+    id: 'pistol',
+    label: 'Pistol squats (one leg)',
+    unit: 'reps',
+    valuePrompt: 'Number of reps',
+    titleTemplate: '{value} pistol squats',
+    goalTemplate: 'Do {value} consecutive one-leg pistol squats before the deadline.',
     criteriaTemplate:
-      'A photo of a fitness-app/watch summary shows a single run of at least {value} km, with the distance figure clearly legible.',
+      'A single continuous video shows {value} consecutive pistol squats on one leg: descending to full depth with the free leg held off the floor and standing back up, without the free leg or hands touching down between reps.',
   },
   {
-    id: 'bodyweight',
-    label: 'Reach a bodyweight',
-    unit: 'kg',
-    valuePrompt: 'Target bodyweight (kg)',
-    titleTemplate: 'Reach {value} kg bodyweight',
-    goalTemplate: 'Get my bodyweight to {value} kg by the deadline.',
+    id: 'lsit',
+    label: 'L-sit hold',
+    unit: 'sec',
+    valuePrompt: 'Hold duration (seconds)',
+    titleTemplate: 'L-sit for {value}s',
+    goalTemplate: 'Hold an L-sit for {value} seconds before the deadline.',
     criteriaTemplate:
-      'A photo shows a scale display reading {value} kg (or lower, for a cut / higher, for a bulk — your call in the goal), with the number clearly legible.',
+      'A single continuous video shows an L-sit — hips off the ground with both legs straight and held parallel to the floor — for at least {value} seconds, with a visible timer in frame.',
+  },
+  {
+    id: 'frontlever',
+    label: 'Front lever hold',
+    unit: 'sec',
+    valuePrompt: 'Hold duration (seconds)',
+    titleTemplate: 'Front lever for {value}s',
+    goalTemplate: 'Hold a front lever for {value} seconds before the deadline.',
+    criteriaTemplate:
+      'A single continuous video shows a front lever — body horizontal, straight, and roughly parallel to the ground while hanging from a bar — held for at least {value} seconds, with a visible timer in frame.',
+  },
+  {
+    id: 'humanflag',
+    label: 'Human flag hold',
+    unit: 'sec',
+    valuePrompt: 'Hold duration (seconds)',
+    titleTemplate: 'Human flag for {value}s',
+    goalTemplate: 'Hold a human flag for {value} seconds before the deadline.',
+    criteriaTemplate:
+      'A single continuous video shows a human flag — body horizontal off a vertical pole with both arms locked out — held for at least {value} seconds, with a visible timer in frame.',
   },
   {
     id: 'plank',
-    label: 'Hold a plank',
+    label: 'Plank hold',
     unit: 'sec',
     valuePrompt: 'Duration (seconds)',
     titleTemplate: 'Hold a {value}-second plank',
     goalTemplate: 'Hold a forearm plank for {value} seconds straight before the deadline.',
     criteriaTemplate:
       'A single continuous video shows a forearm plank held with a straight body line for at least {value} seconds, with a visible running timer or stopwatch in frame.',
+  },
+  // --- Physique reveals: max dazzle; judged from the final photo -------------
+  {
+    id: 'sixpack',
+    label: 'Reveal a visible six-pack',
+    titleTemplate: 'Reveal a visible six-pack',
+    goalTemplate: 'Get visible six-pack abs by the deadline.',
+    criteriaTemplate:
+      'The final photo shows the bare midsection standing relaxed (NOT flexed or crunched) under even front lighting, with all six abdominal segments individually distinguishable.',
+  },
+  {
+    id: 'bicepvein',
+    label: 'Pop a visible bicep vein',
+    titleTemplate: 'Pop a visible bicep vein',
+    goalTemplate: 'Develop a clearly visible bicep vein when flexed by the deadline.',
+    criteriaTemplate:
+      'The final photo shows the upper arm flexed, with a distinct raised vein (the cephalic vein) clearly visible running along the front of the bicep in good lighting.',
+  },
+  {
+    id: 'serratus',
+    label: 'Show serratus definition',
+    titleTemplate: 'Show off serratus "shark gills"',
+    goalTemplate: 'Reveal defined serratus muscles ("shark gills") by the deadline.',
+    criteriaTemplate:
+      'The final photo shows the side of the torso with the serratus muscles individually defined and visible as finger-like striations along the ribcage under even lighting.',
   },
 ];
 

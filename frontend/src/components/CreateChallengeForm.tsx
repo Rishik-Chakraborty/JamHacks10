@@ -161,7 +161,7 @@ export function CreateChallengeForm() {
         // A custom goal can be rejected by the AI reviewer (HTTP 422) — surface
         // its feedback distinctly so the user knows what to fix.
         if (isCustom) {
-          setReviewError(err instanceof Error ? err.message : 'The AI reviewer rejected this goal.');
+          setReviewError(err instanceof Error ? err.message : 'This goal wasn’t accepted — make it more specific and checkable.');
           setSubmitting(false);
           return;
         }
@@ -215,7 +215,7 @@ export function CreateChallengeForm() {
               Goal
             </label>
             <p className="text-xs text-faint mt-0.5">
-              Pick a ready-made, judge-verifiable goal — or write your own and get it AI-approved.
+              Pick a ready-made, judge-verifiable goal — or write your own.
             </p>
             <select
               id="goalType"
@@ -228,7 +228,7 @@ export function CreateChallengeForm() {
               disabled={submitting}
               className="w-full bg-paper border border-line focus:border-ink outline-none px-3 h-11 mt-1.5 text-ink font-display uppercase tracking-wide text-sm"
             >
-              <option value={CUSTOM}>✦ Make a custom one (get it AI-approved)</option>
+              <option value={CUSTOM}>✦ Write your own goal</option>
               <optgroup label="Pre-made goals">
                 {CHALLENGE_TEMPLATES.map((t) => (
                   <option key={t.id} value={t.id}>
@@ -281,10 +281,10 @@ export function CreateChallengeForm() {
           {isCustom && (
             <div className="mt-5 space-y-5">
               <div className="border border-accent bg-card px-3 py-2">
-                <span className="label text-accent">AI-approved</span>
+                <span className="label text-accent">Custom goal</span>
                 <p className="text-xs text-ink-2 mt-0.5">
-                  When you submit, an AI reviewer checks your goal is objective and verifiable from a
-                  photo or video. If it&rsquo;s too vague or subjective, it&rsquo;ll tell you what to fix.
+                  Make it specific and checkable from a photo or video. Vague or subjective goals get
+                  sent back with notes on what to fix.
                 </p>
               </div>
 
@@ -316,7 +316,7 @@ export function CreateChallengeForm() {
               <div className="rule-ink pt-4">
                 <label htmlFor="successCriteria" className="label block text-ink">Success Criteria</label>
                 <p className="text-xs text-accent mt-0.5 font-semibold">
-                  Be precise and checkable from a photo/video — the AI reviewer and judge read THIS.
+                  Be precise and checkable from a photo/video — the judge reads THIS at the deadline.
                 </p>
                 <textarea
                   id="successCriteria"
@@ -361,7 +361,7 @@ export function CreateChallengeForm() {
           <div className="rule pt-5 mt-7">
             {reviewError ? (
               <div className="border border-no bg-no-soft px-3 py-2.5 mb-4">
-                <p className="label text-no">AI reviewer — not approved</p>
+                <p className="label text-no">This goal needs work</p>
                 <p className="text-sm text-ink-2 mt-1">{reviewError}</p>
               </div>
             ) : null}
@@ -379,10 +379,10 @@ export function CreateChallengeForm() {
               <Button type="submit" variant="accent" size="lg" disabled={submitting}>
                 {submitting
                   ? isCustom
-                    ? 'AI reviewing…'
+                    ? 'Checking…'
                     : 'Opening…'
                   : isCustom
-                    ? 'Submit for approval'
+                    ? 'Submit goal'
                     : 'Open the line'}
               </Button>
               <p className="label tracking-normal">
@@ -403,7 +403,7 @@ export function CreateChallengeForm() {
  * ----------------------------------------------------------------------- */
 function HowItWorks() {
   const steps: { n: string; head: string; body: string }[] = [
-    { n: '01', head: 'Pick or write a goal', body: 'Choose a ready-made goal, or write a custom one the AI approves.' },
+    { n: '01', head: 'Pick or write a goal', body: 'Choose a ready-made goal, or write your own to put on the board.' },
     { n: '02', head: 'Sign the market', body: 'Your wallet opens a parimutuel pool keyed to this line.' },
     { n: '03', head: 'The board reacts', body: 'Spectators stake SOL on YES or NO. Odds move live.' },
     { n: '04', head: 'The bell rings', body: 'At the deadline an AI judge reads your photo/video proof. Winners split the pot.' },
