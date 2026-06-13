@@ -6,15 +6,17 @@
 import { Router } from 'express';
 import { Types } from 'mongoose';
 import { z } from 'zod';
-import type { CreateBetBody } from '../contract';
+import type { CreateBetBody, PortfolioPosition } from '../contract';
 import { BetModel, betToDTO } from '../models/Bet';
-import { ChallengeModel } from '../models/Challenge';
+import { ChallengeModel, challengeToDTO } from '../models/Challenge';
 import { validateBody, asyncHandler } from '../middleware/validate';
 import { HttpError } from '../middleware/error';
 
 export const betsRouter = Router();
 /** Mounted under /api/challenges for the per-challenge bet list route. */
 export const challengeBetsRouter = Router({ mergeParams: true });
+/** Mounted under /api/users for a bettor's cross-market positions. */
+export const userPositionsRouter = Router({ mergeParams: true });
 
 const createBetSchema: z.ZodType<CreateBetBody> = z.object({
   challengeId: z.string().min(1),
@@ -95,5 +97,26 @@ challengeBetsRouter.get(
     const challengeId = assertObjectId(req.params.id, 'challenge');
     const docs = await BetModel.find({ challengeId }).sort({ createdAt: -1 }).limit(100);
     res.json(docs.map(betToDTO));
+  }),
+);
+
+// GET /api/users/:wallet/positions — every bet a wallet holds, joined with its market.
+userPositionsRouter.get(
+  '/:wallet/positions',
+  asyncHandler(async (req, res) => {
+    const wallet = req.params.wallet;
+    const bets = await BetModel.find({ bettorWallet: wallet }).sort({ createdAt: -1 }).limit(300);
+
+    // Batch-load the challenges these bets reference.
+    const challengeIds = [...new Set(bets.map((b) => b.challengeId.toString()))];
+    const challenges = await ChallengeModel.find({ _id: { $in: challengeIds } });
+    const byId = new Map(challenges.map((c) => [c._id.toString(), c]));
+
+    const positions: PortfolioPosition[] = [];
+    for (const bet of bets) {
+      const challenge = byId.get(bet.challengeId.toString());
+      if (challenge) positions.push({ bet: betToDTO(bet), challenge: challengeToDTO(challenge) });
+    }
+    res.json(positions);
   }),
 );

@@ -78,9 +78,9 @@ async function seed() {
   });
 
   await PhotoModel.create([
-    { challengeId: c1._id, capturedAt: daysFromNow(-5), imageData: fakePhoto('Day 1', 280), mimeType: 'image/svg+xml', isFinal: false },
-    { challengeId: c1._id, capturedAt: daysFromNow(-3), imageData: fakePhoto('Day 3', 300), mimeType: 'image/svg+xml', isFinal: false },
-    { challengeId: c1._id, capturedAt: daysFromNow(-0.4), imageData: fakePhoto('Day 6', 320), mimeType: 'image/svg+xml', isFinal: false },
+    { challengeId: c1._id, capturedAt: daysFromNow(-5), imageData: fakePhoto('Day 1', 280), mimeType: 'image/svg+xml', caption: 'Day 1. Baseline arms. The doubters say I fold by week two.', isFinal: false },
+    { challengeId: c1._id, capturedAt: daysFromNow(-3), imageData: fakePhoto('Day 3', 300), mimeType: 'image/svg+xml', caption: 'Day 3 — pump is real, vascularity creeping in. Hold YES.', isFinal: false },
+    { challengeId: c1._id, capturedAt: daysFromNow(-0.4), imageData: fakePhoto('Day 6', 320), mimeType: 'image/svg+xml', caption: 'Day 6. Vein is surfacing under the bicep. Pay attention, NO holders.', isFinal: false },
   ]);
 
   await BetModel.create([
@@ -124,7 +124,7 @@ async function seed() {
     })),
   );
   await PhotoModel.create([
-    { challengeId: c2._id, capturedAt: daysFromNow(-2), imageData: fakePhoto('90kg x1', 200), mimeType: 'image/svg+xml', metricValue: 90, isFinal: false },
+    { challengeId: c2._id, capturedAt: daysFromNow(-2), imageData: fakePhoto('90kg x1', 200), mimeType: 'image/svg+xml', metricValue: 90, caption: '90kg for a clean single tonight. 100 is in range — line says otherwise.', isFinal: false },
   ]);
   await BetModel.create([
     { challengeId: c2._id, bettorWallet: W.skeptic, side: 'no', amountLamports: sol(6), txSig: 'seedSig_c2_skeptic_no', positionPda: 'seedPos_c2_skeptic' },
@@ -161,7 +161,7 @@ async function seed() {
     })),
   );
   await PhotoModel.create([
-    { challengeId: c3._id, capturedAt: daysFromNow(-1.1), imageData: fakePhoto('74.8kg', 140), mimeType: 'image/svg+xml', metricValue: 74.8, isFinal: true },
+    { challengeId: c3._id, capturedAt: daysFromNow(-1.1), imageData: fakePhoto('74.8kg', 140), mimeType: 'image/svg+xml', metricValue: 74.8, caption: '74.8kg on the scale. Cut complete, vascularity unlocked. YES pays out.', isFinal: true },
   ]);
   await BetModel.create([
     { challengeId: c3._id, bettorWallet: W.whale, side: 'yes', amountLamports: sol(3), txSig: 'seedSig_c3_whale_yes', positionPda: 'seedPos_c3_whale', claimed: true },

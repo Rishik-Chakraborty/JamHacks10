@@ -16,6 +16,9 @@ const photoSchema = new Schema(
     gridFsId: { type: Schema.Types.ObjectId },
     mimeType: { type: String, required: true },
     metricValue: { type: Number },
+    caption: { type: String },
+    /** Wallets that have liked this post. */
+    likes: { type: [String], default: [] },
     isFinal: { type: Boolean, default: false },
   },
   { timestamps: { createdAt: true, updatedAt: false }, collection: 'photos' },
@@ -37,6 +40,7 @@ export function photoToDTO(doc: HydratedDocument<PhotoDoc>): Photo {
     gridFsId: gridFsId ? gridFsId.toString() : undefined,
     mimeType: doc.mimeType,
     metricValue: doc.metricValue ?? undefined,
+    caption: doc.caption ?? undefined,
     isFinal: doc.isFinal,
     createdAt: (doc.get('createdAt') as Date).toISOString(),
   };

@@ -10,6 +10,10 @@ import type {
   Bet,
   Comment,
   Odds,
+  PortfolioPosition,
+  FeedPost,
+  Profile,
+  LikeResult,
   CreateUserBody,
   CreateChallengeBody,
   AttachMarketBody,
@@ -38,6 +42,14 @@ export const api = {
   // users
   createUser: (body: CreateUserBody) => request<User>('/users', { method: 'POST', body: JSON.stringify(body) }),
   getUser: (wallet: string) => request<User>(`/users/${wallet}`),
+  getPositions: (wallet: string) => request<PortfolioPosition[]>(`/users/${wallet}/positions`),
+  getProfile: (wallet: string, viewer?: string) =>
+    request<Profile>(`/users/${wallet}/profile${viewer ? `?viewer=${viewer}` : ''}`),
+
+  // social feed
+  getFeed: (wallet?: string) => request<FeedPost[]>(`/feed${wallet ? `?wallet=${wallet}` : ''}`),
+  toggleLike: (photoId: string, wallet: string) =>
+    request<LikeResult>(`/photos/${photoId}/like`, { method: 'POST', body: JSON.stringify({ wallet }) }),
 
   // challenges
   listChallenges: () => request<Challenge[]>('/challenges'),

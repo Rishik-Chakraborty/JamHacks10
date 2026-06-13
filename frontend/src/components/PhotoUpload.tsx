@@ -88,6 +88,7 @@ export function PhotoUpload({ challenge }: Props) {
   const [mimeType, setMimeType] = useState<string>('image/jpeg');
   const [capturedAt, setCapturedAt] = useState<string | null>(null);
   const [metricValue, setMetricValue] = useState<string>('');
+  const [caption, setCaption] = useState<string>('');
   const [isFinal, setIsFinal] = useState(false);
 
   const [busy, setBusy] = useState(false);
@@ -119,6 +120,7 @@ export function PhotoUpload({ challenge }: Props) {
     setImageData(null);
     setCapturedAt(null);
     setMetricValue('');
+    setCaption('');
     setIsFinal(false);
     if (fileRef.current) fileRef.current.value = '';
   }
@@ -132,12 +134,14 @@ export function PhotoUpload({ challenge }: Props) {
     try {
       const trimmed = metricValue.trim();
       const parsedMetric = trimmed === '' ? undefined : Number(trimmed);
+      const trimmedCaption = caption.trim();
       await api.createPhoto({
         challengeId: challenge.id,
         capturedAt,
         imageData,
         mimeType,
         metricValue: parsedMetric !== undefined && Number.isFinite(parsedMetric) ? parsedMetric : undefined,
+        caption: trimmedCaption === '' ? undefined : trimmedCaption,
         isFinal,
       });
       await queryClient.invalidateQueries({ queryKey: ['challenge', challenge.id] });
@@ -238,6 +242,23 @@ export function PhotoUpload({ challenge }: Props) {
             </span>
           </label>
         </div>
+
+        {/* Caption */}
+        <label className="block">
+          <div className="flex items-baseline justify-between">
+            <span className="label">Caption</span>
+            <span className="num text-xs text-faint">{caption.length}/280</span>
+          </div>
+          <textarea
+            value={caption}
+            onChange={(e) => setCaption(e.target.value)}
+            placeholder="optional — what's the story on this shot?"
+            rows={2}
+            maxLength={280}
+            disabled={busy}
+            className="mt-1.5 w-full bg-card border border-line px-3 py-2 text-sm text-ink placeholder:text-faint focus:border-ink focus:outline-none resize-none"
+          />
+        </label>
 
         {isFinal && (
           <div className="border border-accent bg-card px-3 py-2">

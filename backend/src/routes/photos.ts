@@ -28,6 +28,7 @@ const createPhotoSchema: z.ZodType<CreatePhotoBody> = z.object({
   imageData: z.string().min(1),
   mimeType: z.string().min(1),
   metricValue: z.number().optional(),
+  caption: z.string().max(280).optional(),
   isFinal: z.boolean().optional(),
 });
 
@@ -77,6 +78,7 @@ photosRouter.post(
       gridFsId,
       mimeType: body.mimeType,
       metricValue: body.metricValue,
+      caption: body.caption,
       isFinal: body.isFinal ?? false,
     });
 

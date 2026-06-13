@@ -20,13 +20,22 @@ export function Masthead() {
           <div className="label mt-1">The Fitness Prediction Market</div>
         </Link>
 
-        <nav className="flex items-center gap-5 pb-1">
-          <Link href="/" className="display uppercase text-base text-ink hover:text-accent transition-colors">
+        <nav className="flex items-center gap-4 sm:gap-5 pb-1">
+          <Link href="/" className="hidden sm:inline display uppercase text-base text-ink hover:text-accent transition-colors">
             Markets
+          </Link>
+          <Link href="/feed" className="hidden sm:inline display uppercase text-base text-ink hover:text-accent transition-colors">
+            Feed
+          </Link>
+          <Link href="/how-it-works" className="hidden md:inline display uppercase text-base text-ink hover:text-accent transition-colors">
+            How to Bet
+          </Link>
+          <Link href="/portfolio" className="hidden sm:inline display uppercase text-base text-ink hover:text-accent transition-colors">
+            My Bets
           </Link>
           <Link
             href="/create"
-            className="display uppercase text-base text-ink hover:text-accent transition-colors"
+            className="hidden sm:inline display uppercase text-base text-ink hover:text-accent transition-colors"
           >
             Open a Line
           </Link>

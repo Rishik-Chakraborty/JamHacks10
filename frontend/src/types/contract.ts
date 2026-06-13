@@ -90,6 +90,8 @@ export interface Photo {
   gridFsId?: string;
   mimeType: string;
   metricValue?: number;
+  /** Instagram-style caption for the progress post. */
+  caption?: string;
   /** The final photo is the one the AI oracle evaluates at the deadline. */
   isFinal: boolean;
   createdAt: string; // ISO
@@ -195,6 +197,7 @@ export interface CreatePhotoBody {
   imageData: string;
   mimeType: string;
   metricValue?: number;
+  caption?: string;
   isFinal?: boolean;
 }
 
@@ -234,6 +237,39 @@ export interface ChallengeDetail extends Challenge {
   metrics: MetricPoint[];
   recentBets: Bet[];
   comments: Comment[];
+}
+
+/** A bettor's position: their bet joined with the market it was placed on. */
+export interface PortfolioPosition {
+  bet: Bet;
+  challenge: Challenge;
+}
+
+/** An Instagram-style progress post for the social feed. */
+export interface FeedPost {
+  photo: Photo;
+  challenge: Challenge;
+  creator: User | null;
+  likeCount: number;
+  /** Whether the requesting wallet (if provided) has liked this post. */
+  likedByMe: boolean;
+  /** Comments live on the parent challenge thread. */
+  commentCount: number;
+}
+
+/** A creator's public profile: their lines and their post grid. */
+export interface Profile {
+  wallet: string;
+  user: User | null;
+  challenges: Challenge[];
+  posts: FeedPost[];
+}
+
+/** Result of toggling a like on a photo. */
+export interface LikeResult {
+  photoId: string;
+  likeCount: number;
+  liked: boolean;
 }
 
 /* ----------------------------------------------------------------------------
@@ -280,6 +316,11 @@ export const API_ROUTES = {
   // users
   createUser: 'POST /api/users',
   getUser: 'GET /api/users/:wallet',
+  getPositions: 'GET /api/users/:wallet/positions',
+  getProfile: 'GET /api/users/:wallet/profile',
+  // social feed
+  feed: 'GET /api/feed',
+  toggleLike: 'POST /api/photos/:id/like',
   // challenges
   listChallenges: 'GET /api/challenges',
   createChallenge: 'POST /api/challenges',

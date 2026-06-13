@@ -6,10 +6,14 @@ import type { Express } from 'express';
 import { usersRouter } from './users';
 import { challengesRouter } from './challenges';
 import { photosRouter, challengePhotosRouter } from './photos';
-import { betsRouter, challengeBetsRouter } from './bets';
+import { betsRouter, challengeBetsRouter, userPositionsRouter } from './bets';
+import { feedRouter, photoLikeRouter, profileRouter } from './feed';
 import { commentsRouter, challengeCommentsRouter } from './comments';
 
 export function mountRoutes(app: Express): void {
+  app.use('/api/feed', feedRouter);
+  app.use('/api/users', userPositionsRouter);
+  app.use('/api/users', profileRouter);
   app.use('/api/users', usersRouter);
 
   // Per-challenge sub-resource list routes (GET /api/challenges/:id/{photos,bets,comments}).
@@ -20,6 +24,7 @@ export function mountRoutes(app: Express): void {
   app.use('/api/challenges', challengeCommentsRouter);
   app.use('/api/challenges', challengesRouter);
 
+  app.use('/api/photos', photoLikeRouter);
   app.use('/api/photos', photosRouter);
   app.use('/api/bets', betsRouter);
   app.use('/api/comments', commentsRouter);
