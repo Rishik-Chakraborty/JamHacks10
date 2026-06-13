@@ -8,7 +8,10 @@ import type { Photo } from '../contract';
 
 const photoSchema = new Schema(
   {
-    challengeId: { type: Schema.Types.ObjectId, ref: 'Challenge', required: true, index: true },
+    /** Wallet that posted this. */
+    authorWallet: { type: String, index: true },
+    /** Set when attached to a line (progress / final proof); absent for standalone posts. */
+    challengeId: { type: Schema.Types.ObjectId, ref: 'Challenge', index: true },
     capturedAt: { type: Date, required: true },
     /** Inline base64 data URL for small images. */
     imageData: { type: String },
@@ -36,7 +39,8 @@ export function photoToDTO(doc: HydratedDocument<PhotoDoc>): Photo {
   const gridFsId = doc.gridFsId as Types.ObjectId | undefined | null;
   return {
     id: doc._id.toString(),
-    challengeId: doc.challengeId.toString(),
+    authorWallet: doc.authorWallet ?? undefined,
+    challengeId: doc.challengeId ? doc.challengeId.toString() : undefined,
     capturedAt: doc.capturedAt.toISOString(),
     imageData: doc.imageData ?? undefined,
     gridFsId: gridFsId ? gridFsId.toString() : undefined,

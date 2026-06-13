@@ -145,7 +145,10 @@ export interface Challenge {
 
 export interface Photo {
   id: string;
-  challengeId: string;
+  /** Wallet that posted this. */
+  authorWallet?: string;
+  /** Set when the post is attached to a line (progress / final proof); absent for standalone posts. */
+  challengeId?: string;
   capturedAt: string; // ISO (client-timestamped)
   /** Either inline base64 data URL (small) or a GridFS id reference (large). */
   imageData?: string;
@@ -319,7 +322,10 @@ export interface AttachMarketBody {
 }
 
 export interface CreatePhotoBody {
-  challengeId: string;
+  /** Author of the post. */
+  authorWallet: string;
+  /** Optional — attach the post to a line (progress / final proof). Omit for a standalone post. */
+  challengeId?: string;
   capturedAt: string; // ISO
   /** base64 data URL; backend decides inline vs GridFS by size. */
   imageData: string;
@@ -382,15 +388,17 @@ export interface PortfolioPosition {
   refunded?: boolean;
 }
 
-/** An Instagram-style progress post for the social feed. */
+/** An Instagram-style post for the social feed (standalone, or attached to a line). */
 export interface FeedPost {
   photo: Photo;
-  challenge: Challenge;
+  /** The attached line, if this post is progress/final proof for one; null for standalone posts. */
+  challenge: Challenge | null;
+  /** The post's author. */
   creator: User | null;
   likeCount: number;
   /** Whether the requesting wallet (if provided) has liked this post. */
   likedByMe: boolean;
-  /** Comments live on the parent challenge thread. */
+  /** Comments live on the attached line's thread (0 for standalone posts). */
   commentCount: number;
 }
 

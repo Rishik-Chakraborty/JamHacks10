@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
+import { Plus } from 'lucide-react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { UserSearch } from '@/components/UserSearch';
 
@@ -20,40 +21,29 @@ export function Masthead() {
       <div className="max-w-6xl mx-auto px-5 py-3 flex items-end justify-between gap-4">
         <Link href="/" className="group">
           <div className="display text-4xl sm:text-5xl text-ink leading-none">
-            Gym<span className="text-accent">Cast</span>
+            the gains<span className="text-accent">Xchange</span>
           </div>
-          <div className="label mt-1">The Fitness Prediction Market</div>
+          <div className="label mt-1">Bet on the grind</div>
         </Link>
 
         <nav className="flex items-center gap-4 sm:gap-5 pb-1">
-          <Link href="/" className="hidden sm:inline display uppercase text-base text-ink hover:text-accent transition-colors">
-            Markets
-          </Link>
-          <Link href="/lines" className="hidden sm:inline display uppercase text-base text-ink hover:text-accent transition-colors">
-            Lines
-          </Link>
           <Link href="/feed" className="hidden sm:inline display uppercase text-base text-ink hover:text-accent transition-colors">
             Feed
-          </Link>
-          <Link href="/how-it-works" className="hidden md:inline display uppercase text-base text-ink hover:text-accent transition-colors">
-            How to Bet
           </Link>
           <Link href="/portfolio" className="hidden sm:inline display uppercase text-base text-ink hover:text-accent transition-colors">
             My Bets
           </Link>
           {wallet && (
-            <Link
-              href={`/u/${wallet}`}
-              className="hidden sm:inline display uppercase text-base text-ink hover:text-accent transition-colors"
-            >
+            <Link href={`/u/${wallet}`} className="hidden sm:inline display uppercase text-base text-ink hover:text-accent transition-colors">
               Profile
             </Link>
           )}
           <Link
-            href="/create"
-            className="hidden sm:inline display uppercase text-base text-ink hover:text-accent transition-colors"
+            href="/post/new"
+            title="New post"
+            className="inline-flex items-center justify-center h-9 w-9 bg-ink text-paper border border-ink hover:bg-accent hover:border-accent transition-colors"
           >
-            Open a Line
+            <Plus className="h-5 w-5" strokeWidth={2.5} />
           </Link>
           <UserSearch />
           <WalletMultiButton />

@@ -239,6 +239,7 @@ export function PhotoUpload({ challenge }: Props) {
       const parsedMetric = trimmed === '' ? undefined : Number(trimmed);
       const trimmedCaption = caption.trim();
       await api.createPhoto({
+        authorWallet: publicKey!.toBase58(),
         challengeId: challenge.id,
         capturedAt,
         imageData,

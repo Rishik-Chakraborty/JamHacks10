@@ -16,9 +16,9 @@ const archivo = Archivo({
 });
 
 export const metadata: Metadata = {
-  title: "GymCast — Fitness Prediction Markets",
+  title: "the gainsXchange — Bet on the grind",
   description:
-    "Back your discipline or doubt theirs. Public fitness goals, parimutuel markets, settled on Solana.",
+    "Challenge fitness influencers and bet on whether they deliver. An Instagram-style feed, parimutuel lines, settled on Solana.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { useWallet } from '@solana/wallet-adapter-react';
@@ -32,6 +33,8 @@ export function ProfileView({ wallet }: { wallet: string }) {
     queryFn: () => api.getProfile(wallet, viewerWallet),
     refetchInterval: 30_000,
   });
+
+  const [tab, setTab] = useState<'posts' | 'lines'>('posts');
 
   if (isLoading) {
     return (
@@ -135,7 +138,15 @@ export function ProfileView({ wallet }: { wallet: string }) {
               {isOwn ? (
                 <EditProfile wallet={wallet} user={user} />
               ) : (
-                <FollowButton targetWallet={wallet} initialFollowing={data.isFollowedByViewer ?? false} />
+                <>
+                  <FollowButton targetWallet={wallet} initialFollowing={data.isFollowedByViewer ?? false} />
+                  <Link
+                    href={`/create?influencer=${wallet}`}
+                    className="inline-flex h-8 items-center px-3 bg-accent text-paper border border-accent font-display uppercase tracking-wide text-sm hover:bg-accent-deep transition-colors"
+                  >
+                    Challenge
+                  </Link>
+                </>
               )}
             </div>
           </div>
@@ -167,45 +178,54 @@ export function ProfileView({ wallet }: { wallet: string }) {
         </div>
       </section>
 
-      {/* --- Empty state --------------------------------------------------- */}
-      {challenges.length === 0 && posts.length === 0 ? (
-        <section className="py-16">
-          <div className="border border-line bg-card p-10 text-center max-w-2xl mx-auto">
-            <p className="display text-2xl text-ink">Nothing on the card yet</p>
-            <p className="text-sm text-muted mt-2">This athlete hasn&rsquo;t posted yet.</p>
+      {/* --- Tabs: Posts | Lines (Instagram-style) ------------------------- */}
+      <section className="py-7">
+        <div className="flex gap-2 border-b-2 border-ink pb-3">
+          {(['posts', 'lines'] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTab(t)}
+              className={`px-4 h-9 font-display uppercase tracking-wide text-sm border transition-colors ${
+                tab === t ? 'bg-ink text-paper border-ink' : 'bg-transparent text-ink border-line hover:border-ink'
+              }`}
+            >
+              {t === 'posts' ? `Posts ${posts.length}` : `Lines ${challenges.length}`}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'posts' ? (
+          posts.length === 0 ? (
+            <div className="border border-line bg-card p-10 text-center mt-5">
+              <p className="display text-xl text-ink">No posts yet</p>
+              <p className="text-sm text-muted mt-1.5">{isOwn ? 'Tap + to share your first post.' : 'Nothing posted yet.'}</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-px bg-line border border-line mt-5">
+              {posts.map((post) => (
+                <PostThumb key={post.photo.id} post={post} />
+              ))}
+            </div>
+          )
+        ) : challenges.length === 0 ? (
+          <div className="border border-line bg-card p-10 text-center mt-5">
+            <p className="display text-xl text-ink">No lines yet</p>
+            <p className="text-sm text-muted mt-1.5">
+              {isOwn ? 'Lines appear here when someone challenges you and you accept.' : 'No one has challenged them yet.'}
+            </p>
           </div>
-        </section>
-      ) : (
-        <>
-          {/* --- Lines ----------------------------------------------------- */}
-          {challenges.length > 0 && (
-            <section className="py-7">
-              <LineGroup title="Open Lines" challenges={open} side="open" />
-              {closed.length > 0 && (
-                <div className="mt-10">
-                  <LineGroup title="Closed & Settled" challenges={closed} side="settled" />
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* --- Posts grid ------------------------------------------------ */}
-          {posts.length > 0 && (
-            <section className="py-7 border-t border-ink">
-              <div className="flex items-end justify-between border-b-2 border-ink pb-3">
-                <h2 className="display text-2xl sm:text-3xl text-ink">The Grid</h2>
-                <span className="label hidden sm:block">{posts.length} post{posts.length === 1 ? '' : 's'}</span>
+        ) : (
+          <div className="mt-5">
+            <LineGroup title="Open Lines" challenges={open} side="open" />
+            {closed.length > 0 && (
+              <div className="mt-10">
+                <LineGroup title="Closed & Settled" challenges={closed} side="settled" />
               </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-px bg-line border border-line mt-5">
-                {posts.map((post) => (
-                  <PostThumb key={post.photo.id} post={post} />
-                ))}
-              </div>
-            </section>
-          )}
-        </>
-      )}
+            )}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
@@ -245,38 +265,32 @@ function LineGroup({
 
 function PostThumb({ post }: { post: FeedPost }) {
   const { photo, challenge, likeCount } = post;
+  // Line-attached posts link to the line; standalone posts aren't clickable-through.
+  const Wrapper = challenge
+    ? ({ children }: { children: React.ReactNode }) => (
+        <Link href={`/challenge/${challenge.id}`} className="group relative block bg-paper-2 aspect-square overflow-hidden">
+          {children}
+        </Link>
+      )
+    : ({ children }: { children: React.ReactNode }) => (
+        <div className="group relative block bg-paper-2 aspect-square overflow-hidden">{children}</div>
+      );
 
   return (
-    <Link
-      href={`/challenge/${challenge.id}`}
-      className="group relative block bg-paper-2 aspect-square overflow-hidden"
-    >
+    <Wrapper>
       {isVideo(photo) ? (
         /* eslint-disable-next-line jsx-a11y/media-has-caption */
-        <video
-          src={mediaSrc(photo)}
-          muted
-          playsInline
-          preload="metadata"
-          className="block w-full h-full object-cover bg-ink"
-        />
+        <video src={mediaSrc(photo)} muted playsInline preload="metadata" className="block w-full h-full object-cover bg-ink" />
       ) : (
         /* eslint-disable-next-line @next/next/no-img-element */
-        <img
-          src={mediaSrc(photo)}
-          alt={photo.caption || `Progress shot · ${challenge.title}`}
-          className="block w-full h-full object-cover"
-        />
+        <img src={mediaSrc(photo)} alt={photo.caption || 'Post'} className="block w-full h-full object-cover" />
       )}
 
       {/* Corner tags */}
       <div className="absolute top-0 left-0 m-1.5 flex gap-1.5">
-        {photo.isFinal && (
-          <Tag tone="accent" solid>
-            Final
-          </Tag>
-        )}
+        {photo.isFinal && <Tag tone="accent" solid>Final</Tag>}
         {isVideo(photo) && <Tag tone="ink" solid>Video</Tag>}
+        {challenge && <Tag tone="muted" solid>Line</Tag>}
       </div>
 
       {/* Like overlay — appears on hover */}
@@ -285,6 +299,6 @@ function PostThumb({ post }: { post: FeedPost }) {
           {likeCount} <span className="label text-paper tracking-normal">like{likeCount === 1 ? '' : 's'}</span>
         </span>
       </div>
-    </Link>
+    </Wrapper>
   );
 }

@@ -32,42 +32,53 @@ function assertObjectId(id: string, label: string): Types.ObjectId {
   return new Types.ObjectId(id);
 }
 
-/** Enrich raw photo docs into FeedPosts (batched challenge/user/comment lookups). */
+/**
+ * Enrich raw photo/post docs into FeedPosts. A post may be standalone (no line)
+ * or attached to a line; the author comes from `authorWallet` (legacy line posts
+ * fall back to the line's influencer). Batched challenge/user/comment lookups.
+ */
 async function buildFeedPosts(
   photos: HydratedDocument<PhotoDoc>[],
   viewerWallet?: string,
 ): Promise<FeedPost[]> {
   if (photos.length === 0) return [];
 
-  const challengeIds = [...new Set(photos.map((p) => p.challengeId.toString()))];
-  const objIds = challengeIds.map((id) => new Types.ObjectId(id));
+  const challengeObjIds = [
+    ...new Set(photos.filter((p) => p.challengeId).map((p) => p.challengeId!.toString())),
+  ].map((id) => new Types.ObjectId(id));
 
-  const challenges = await ChallengeModel.find({ _id: { $in: objIds } });
+  const challenges = await ChallengeModel.find({ _id: { $in: challengeObjIds } });
   const challengeById = new Map(challenges.map((c) => [c._id.toString(), c]));
 
-  const creatorWallets = [...new Set(challenges.map((c) => c.creatorWallet))];
-  const users = await UserModel.find({ wallet: { $in: creatorWallets } });
+  // Author = the post's authorWallet, falling back to the attached line's influencer.
+  const authorWallets = new Set<string>();
+  for (const p of photos) {
+    const challenge = p.challengeId ? challengeById.get(p.challengeId.toString()) : undefined;
+    const author = p.authorWallet ?? challenge?.creatorWallet;
+    if (author) authorWallets.add(author);
+  }
+  const users = await UserModel.find({ wallet: { $in: [...authorWallets] } });
   const userByWallet = new Map(users.map((u) => [u.wallet, u]));
 
   const commentCounts = await CommentModel.aggregate<{ _id: Types.ObjectId; n: number }>([
-    { $match: { challengeId: { $in: objIds } } },
+    { $match: { challengeId: { $in: challengeObjIds } } },
     { $group: { _id: '$challengeId', n: { $sum: 1 } } },
   ]);
   const commentCountById = new Map(commentCounts.map((c) => [c._id.toString(), c.n]));
 
   const posts: FeedPost[] = [];
   for (const photo of photos) {
-    const challenge = challengeById.get(photo.challengeId.toString());
-    if (!challenge) continue;
+    const challenge = photo.challengeId ? challengeById.get(photo.challengeId.toString()) : undefined;
+    const authorWallet = photo.authorWallet ?? challenge?.creatorWallet;
+    const creator = authorWallet ? userByWallet.get(authorWallet) : undefined;
     const likes = (photo.likes ?? []) as string[];
-    const creator = userByWallet.get(challenge.creatorWallet);
     posts.push({
       photo: photoToDTO(photo),
-      challenge: challengeToDTO(challenge),
+      challenge: challenge ? challengeToDTO(challenge) : null,
       creator: creator ? userToDTO(creator) : null,
       likeCount: likes.length,
       likedByMe: viewerWallet ? likes.includes(viewerWallet) : false,
-      commentCount: commentCountById.get(photo.challengeId.toString()) ?? 0,
+      commentCount: challenge ? commentCountById.get(challenge._id.toString()) ?? 0 : 0,
     });
   }
   return posts;
@@ -89,9 +100,10 @@ feedRouter.get(
     if (viewer) {
       const f = await FollowModel.find({ follower: viewer }).select('following').lean();
       const following = new Set(f.map((x) => x.following));
+      const authorOf = (p: FeedPost) => p.photo.authorWallet ?? p.challenge?.creatorWallet ?? '';
       posts = posts.sort((a, b) => {
-        const fa = following.has(a.challenge.creatorWallet) ? 1 : 0;
-        const fb = following.has(b.challenge.creatorWallet) ? 1 : 0;
+        const fa = following.has(authorOf(a)) ? 1 : 0;
+        const fb = following.has(authorOf(b)) ? 1 : 0;
         if (fa !== fb) return fb - fa;
         return new Date(b.photo.capturedAt).getTime() - new Date(a.photo.capturedAt).getTime();
       });
@@ -140,12 +152,9 @@ profileRouter.get(
 
     const user = await UserModel.findOne({ wallet });
     const challenges = await ChallengeModel.find({ creatorWallet: wallet }).sort({ createdAt: -1 });
-    const challengeIds = challenges.map((c) => c._id);
 
-    const photos =
-      challengeIds.length > 0
-        ? await PhotoModel.find({ challengeId: { $in: challengeIds } }).sort({ createdAt: -1 })
-        : [];
+    // The user's own posts (standalone + line-attached they authored).
+    const photos = await PhotoModel.find({ authorWallet: wallet }).sort({ createdAt: -1 });
 
     // Creator-program earnings = sum of the influencer's cut across resolved lines.
     const challengeDtos = challenges.map(challengeToDTO);

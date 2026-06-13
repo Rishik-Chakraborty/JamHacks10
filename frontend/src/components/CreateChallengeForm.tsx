@@ -90,6 +90,15 @@ export function CreateChallengeForm() {
     return () => clearTimeout(id);
   }, [infQuery]);
 
+  // Pre-fill the influencer from ?influencer=<wallet> (the Challenge button flow).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const pre = new URLSearchParams(window.location.search).get('influencer');
+    if (!pre) return;
+    setInfluencer({ wallet: pre, username: shortWallet(pre) });
+    api.getUser(pre).then((u) => setInfluencer({ wallet: pre, username: u.username })).catch(() => {});
+  }, []);
+
   const { data: infResults } = useQuery<User[]>({
     queryKey: ['userSearch', infDebounced],
     queryFn: () => api.searchUsers(infDebounced),

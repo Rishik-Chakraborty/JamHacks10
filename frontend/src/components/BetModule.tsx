@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useConnection, useWallet, useAnchorWallet } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import type { ChallengeDetail, Odds, BetSide } from '@/types/contract';
@@ -22,11 +23,13 @@ export function BetModule({ challenge, odds }: Props) {
   const { connection } = useConnection();
   const { connected, publicKey } = useWallet();
   const anchorWallet = useAnchorWallet();
+  const queryClient = useQueryClient();
 
   const [side, setSide] = useState<BetSide>('yes');
   const [amount, setAmount] = useState('');
   const [pending, setPending] = useState(false);
   const [sig, setSig] = useState<string | null>(null);
+  const [placed, setPlaced] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const programReady = Boolean(process.env.NEXT_PUBLIC_PROGRAM_ID);
@@ -53,35 +56,43 @@ export function BetModule({ challenge, odds }: Props) {
   const validAmount = Number.isFinite(sol) && sol > 0;
   const mult = side === 'yes' ? odds.yesMultiplier : odds.noMultiplier;
 
+  // On-chain when the line has a deployed market + a connected anchor wallet;
+  // otherwise a web2 bet recorded straight to the database (no chain escrow yet).
+  const onChain = programReady && marketReady && Boolean(anchorWallet);
+
   async function onPlace() {
     if (!validAmount || !publicKey) return;
     setErr(null);
     setSig(null);
+    setPlaced(false);
     setPending(true);
     const amountLamports = Math.round(sol * LAMPORTS_PER_SOL);
+    const bettorWallet = publicKey.toBase58();
     try {
-      const { txSig, positionPda } = await placeBet({
-        connection,
-        wallet: anchorWallet,
-        marketPda: challenge.marketPda!,
-        side,
-        amountLamports,
-      });
-      setSig(txSig);
-      // Mirror to backend — already on-chain, so swallow any mirror failure.
-      try {
-        await api.createBet({
-          challengeId: challenge.id,
-          bettorWallet: publicKey.toBase58(),
+      if (onChain) {
+        const { txSig, positionPda } = await placeBet({
+          connection,
+          wallet: anchorWallet,
+          marketPda: challenge.marketPda!,
           side,
           amountLamports,
-          txSig,
-          positionPda,
         });
-      } catch {
-        /* mirror is best-effort */
+        setSig(txSig);
+        try {
+          await api.createBet({ challengeId: challenge.id, bettorWallet, side, amountLamports, txSig, positionPda });
+        } catch {
+          /* mirror is best-effort once it's on-chain */
+        }
+      } else {
+        // Web2 fallback — record the bet directly. Synthetic ids satisfy the
+        // unique txSig index (same approach as the challenger's seed bet).
+        const txSig = `web2_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        const positionPda = `web2pos_${challenge.id}_${bettorWallet.slice(0, 8)}`;
+        await api.createBet({ challengeId: challenge.id, bettorWallet, side, amountLamports, txSig, positionPda });
+        setPlaced(true);
       }
       setAmount('');
+      await queryClient.invalidateQueries({ queryKey: ['challenge', challenge.id] });
     } catch (e) {
       setErr(e instanceof MarketClientError || e instanceof Error ? e.message : 'Bet failed.');
     } finally {
@@ -96,10 +107,6 @@ export function BetModule({ challenge, odds }: Props) {
 
       {statusMsg ? (
         <p className="text-sm text-muted mt-3">{statusMsg}</p>
-      ) : !programReady || !marketReady ? (
-        <p className="text-sm text-muted mt-3">
-          Market not live yet — betting opens once the on-chain market is deployed.
-        </p>
       ) : locked ? (
         <p className="text-sm text-muted mt-3">Betting is locked — within 12h of the deadline.</p>
       ) : isInfluencer ? (
@@ -185,6 +192,10 @@ export function BetModule({ challenge, odds }: Props) {
                 View on Explorer
               </a>
             </p>
+          )}
+          {placed && <p className="text-sm text-yes">Bet placed — recorded to your positions.</p>}
+          {!onChain && (
+            <p className="text-xs text-faint">Off-chain bet (this line has no on-chain market yet).</p>
           )}
           {err && <p className="text-sm text-no">{err}</p>}
         </div>

@@ -24,7 +24,8 @@ export const challengePhotosRouter = Router({ mergeParams: true });
 const INLINE_LIMIT_BYTES = 1024 * 1024;
 
 const createPhotoSchema: z.ZodType<CreatePhotoBody> = z.object({
-  challengeId: z.string().min(1),
+  authorWallet: z.string().min(1),
+  challengeId: z.string().min(1).optional(),
   capturedAt: z.string().datetime(),
   imageData: z.string().min(1),
   mimeType: z.string().min(1),
@@ -52,10 +53,19 @@ photosRouter.post(
   validateBody(createPhotoSchema),
   asyncHandler(async (req, res) => {
     const body = req.body as CreatePhotoBody;
-    const challengeId = assertObjectId(body.challengeId, 'challenge');
 
-    const challenge = await ChallengeModel.findById(challengeId);
-    if (!challenge) throw new HttpError(404, 'Challenge not found');
+    // A post may be standalone (no challengeId) or attached to a line (progress
+    // / final proof). Only the line's influencer may post to it.
+    let challengeObjId: Types.ObjectId | undefined;
+    let challenge = null;
+    if (body.challengeId) {
+      challengeObjId = assertObjectId(body.challengeId, 'challenge');
+      challenge = await ChallengeModel.findById(challengeObjId);
+      if (!challenge) throw new HttpError(404, 'Line not found');
+      if (challenge.creatorWallet !== body.authorWallet) {
+        throw new HttpError(403, 'Only the influencer can post to this line');
+      }
+    }
 
     const decoded = decodeBase64Image(body.imageData);
     const isLarge = decoded.byteLength >= INLINE_LIMIT_BYTES;
@@ -64,7 +74,7 @@ photosRouter.post(
     if (isLarge) {
       const bucket = getBucket();
       gridFsId = await new Promise<Types.ObjectId>((resolve, reject) => {
-        const upload = bucket.openUploadStream(`${body.challengeId}-${Date.now()}`, {
+        const upload = bucket.openUploadStream(`${body.authorWallet}-${Date.now()}`, {
           contentType: body.mimeType,
         });
         upload.on('error', reject);
@@ -74,7 +84,8 @@ photosRouter.post(
     }
 
     const doc = await PhotoModel.create({
-      challengeId,
+      authorWallet: body.authorWallet,
+      challengeId: challengeObjId,
       capturedAt: new Date(body.capturedAt),
       imageData: isLarge ? undefined : body.imageData,
       gridFsId,
@@ -85,29 +96,26 @@ photosRouter.post(
       isFinal: body.isFinal ?? false,
     });
 
-    // Posting bumps momentum + records the most recent post time.
-    const update: Record<string, unknown> = {
-      $set: { lastPostAt: new Date() },
-      $inc: { streak: 1, hypeScore: 1 },
-    };
-    await ChallengeModel.updateOne({ _id: challengeId }, update);
-
-    // Any photo carrying a metric value appends a time-series progress point
-    // (the final photo's metric also feeds the Hype Meter / resolution view).
-    if (typeof body.metricValue === 'number') {
-      await MetricModel.create({
-        challengeId,
-        ts: new Date(body.capturedAt),
-        unit: challenge.metricUnit ?? undefined,
-        value: body.metricValue,
-      });
+    // Line-attached posts bump the line's momentum + (optionally) its metric series.
+    if (challenge && challengeObjId) {
+      await ChallengeModel.updateOne(
+        { _id: challengeObjId },
+        { $set: { lastPostAt: new Date() }, $inc: { streak: 1, hypeScore: 1 } },
+      );
+      if (typeof body.metricValue === 'number') {
+        await MetricModel.create({
+          challengeId: challengeObjId,
+          ts: new Date(body.capturedAt),
+          unit: challenge.metricUnit ?? undefined,
+          value: body.metricValue,
+        });
+      }
     }
 
     res.status(201).json(photoToDTO(doc));
 
-    // Posting final proof kicks off the AI Trusted Oracle review (best-effort,
-    // async — never blocks the upload). Sets the line to under_review + verdict.
-    if (body.isFinal) {
+    // The FINAL post for a line kicks off the AI Trusted Oracle review (async).
+    if (body.challengeId && body.isFinal) {
       void reviewChallenge(body.challengeId).catch((e) =>
         console.warn('[photos] oracle review trigger failed:', e),
       );

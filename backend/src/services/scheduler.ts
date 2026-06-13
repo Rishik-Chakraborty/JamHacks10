@@ -15,9 +15,9 @@ export function startScheduler(): void {
 
   cron.schedule('* * * * *', async () => {
     try {
-      const { finalized, refunded } = await sweepResolutions();
-      if (finalized || refunded) {
-        console.log(`[scheduler] auto-finalized ${finalized}, refunded ${refunded} no-shows`);
+      const { refunded } = await sweepResolutions();
+      if (refunded) {
+        console.log(`[scheduler] refunded ${refunded} no-show line(s)`);
       }
     } catch (err) {
       console.warn('[scheduler] sweep failed:', err);

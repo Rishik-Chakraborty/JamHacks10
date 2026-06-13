@@ -30,7 +30,6 @@ import {
 } from '../contract';
 import { env } from '../config/env';
 import { reviewGoal } from '../services/ai';
-import { disputeChallenge } from '../services/resolve';
 import { computeSettlement } from '../services/payouts';
 import { ChallengeModel, challengeToDTO } from '../models/Challenge';
 import { UserModel } from '../models/User';
@@ -85,7 +84,6 @@ const createChallengeSchema: z.ZodType<CreateChallengeBody> = z.object({
 
 const acceptLineSchema: z.ZodType<AcceptLineBody> = z.object({ influencerWallet: z.string().min(1) });
 const declineLineSchema: z.ZodType<DeclineLineBody> = z.object({ influencerWallet: z.string().min(1) });
-const disputeLineSchema = z.object({ wallet: z.string().min(1), reason: z.string().max(280).optional() });
 
 const attachMarketSchema: z.ZodType<AttachMarketBody> = z.object({
   marketPda: z.string().min(1),
@@ -371,16 +369,3 @@ challengesRouter.post(
   }),
 );
 
-// POST /api/challenges/:id/dispute — contest the oracle verdict during the window.
-challengesRouter.post(
-  '/:id/dispute',
-  validateBody(disputeLineSchema),
-  asyncHandler(async (req, res) => {
-    const _id = assertObjectId(req.params.id);
-    const body = req.body as z.infer<typeof disputeLineSchema>;
-    await disputeChallenge(req.params.id, body.wallet, body.reason);
-    const challenge = await ChallengeModel.findById(_id);
-    if (!challenge) throw new HttpError(404, 'Line not found');
-    res.json(challengeToDTO(challenge));
-  }),
-);

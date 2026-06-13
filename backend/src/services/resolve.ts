@@ -25,7 +25,7 @@ import { UserModel } from '../models/User';
 import { evaluateGoal, type EvaluateImage } from './ai';
 import { resolveMarket, fetchMarket } from './solana';
 import { emitTicker } from '../realtime';
-import { DISPUTE_WINDOW_HOURS, PROOF_GRACE_HOURS } from '../contract';
+import { PROOF_GRACE_HOURS } from '../contract';
 import type { BetSide, Outcome, OracleVerdict, ResolveChallengeResponse } from '../contract';
 
 const HOUR_MS = 3_600_000;
@@ -118,7 +118,6 @@ export async function reviewChallenge(challengeId: string): Promise<{ verdict: O
   challenge.status = 'under_review';
   challenge.set('verdict', verdict);
   challenge.proposedOutcome = proposedOutcome;
-  challenge.disputeWindowEndsAt = new Date(Date.now() + DISPUTE_WINDOW_HOURS * HOUR_MS);
   await challenge.save();
 
   emitTicker({
@@ -126,10 +125,15 @@ export async function reviewChallenge(challengeId: string): Promise<{ verdict: O
     challengeId,
     challengeTitle: challenge.title,
     message: proposedOutcome
-      ? `Verdict in: leaning ${proposedOutcome.toUpperCase()} — dispute window open.`
+      ? `Verdict in: ${proposedOutcome.toUpperCase()} — settling.`
       : 'Final proof in — flagged for manual review.',
     at: new Date().toISOString(),
   });
+
+  // A confident verdict settles immediately; low-confidence holds for manual review.
+  if (proposedOutcome) {
+    await finalizeChallenge(challengeId, proposedOutcome as BetSide);
+  }
 
   return { verdict, proposedOutcome };
 }
@@ -241,55 +245,35 @@ export async function resolveChallenge(challengeId: string, manualOutcome?: BetS
 
   // No verdict yet (active, or under_review without one) → run the oracle review.
   const storedVerdict = challenge.verdict as OracleVerdict | undefined;
+
+  // No verdict yet → run the oracle review (which auto-settles a confident call).
   if (challenge.status === 'active' || !storedVerdict) {
     const { verdict } = await reviewChallenge(challengeId);
-    return { verdict, resolvedOutcome: null };
+    const fresh = await ChallengeModel.findById(challengeId);
+    return { verdict, resolvedOutcome: fresh?.status === 'resolved' ? (fresh.outcome as Outcome) : null };
   }
 
-  // Under review with a verdict.
-  if (challenge.status === 'disputed') {
-    return { verdict: storedVerdict, resolvedOutcome: null }; // needs a manual override
+  // Under review with a verdict: settle if it proposed an outcome, else hold for manual.
+  if (challenge.proposedOutcome) {
+    const { resolveTxSig } = await finalizeChallenge(challengeId, challenge.proposedOutcome as BetSide);
+    return { verdict: storedVerdict, resolvedOutcome: challenge.proposedOutcome, resolveTxSig };
   }
-  if (!challenge.proposedOutcome) {
-    return { verdict: storedVerdict, resolvedOutcome: null }; // needs manual review
-  }
-  if (challenge.disputeWindowEndsAt && challenge.disputeWindowEndsAt.getTime() > Date.now()) {
-    return { verdict: storedVerdict, resolvedOutcome: null }; // still inside the dispute window
-  }
-
-  const { resolveTxSig } = await finalizeChallenge(challengeId, challenge.proposedOutcome as BetSide);
-  return { verdict: storedVerdict, resolvedOutcome: challenge.proposedOutcome, resolveTxSig };
+  return { verdict: storedVerdict, resolvedOutcome: null };
 }
 
 /* -------------------------------------------------------------------------- */
 /* Cron heartbeat — auto-finalize past-window lines + refund no-shows           */
 /* -------------------------------------------------------------------------- */
-export async function sweepResolutions(): Promise<{ finalized: number; refunded: number }> {
+export async function sweepResolutions(): Promise<{ refunded: number }> {
   const now = Date.now();
-  let finalized = 0;
   let refunded = 0;
 
-  // 1) under_review past the dispute window, undisputed, with a proposed outcome → finalize.
-  const ready = await ChallengeModel.find({
-    status: 'under_review',
-    proposedOutcome: { $in: ['yes', 'no'] },
-    disputeWindowEndsAt: { $lte: new Date(now) },
-  }).select('_id proposedOutcome');
-  for (const c of ready) {
-    try {
-      await finalizeChallenge(c._id.toString(), c.proposedOutcome as BetSide);
-      finalized++;
-    } catch (err) {
-      console.warn('[sweep] finalize failed for', c._id.toString(), err);
-    }
-  }
-
-  // 2) accepted lines past (deadline + grace) with no final proof → refund (no-show).
+  // Accepted lines past (deadline + grace) with no final proof → refund (no-show).
   const graceCutoff = new Date(now - PROOF_GRACE_HOURS * HOUR_MS);
   const overdue = await ChallengeModel.find({ status: 'active', deadline: { $lte: graceCutoff } }).select('_id');
   for (const c of overdue) {
     const hasFinal = await PhotoModel.exists({ challengeId: c._id, isFinal: true });
-    if (hasFinal) continue; // they posted; resolution will run via the photos hook
+    if (hasFinal) continue; // they posted; the photos hook runs resolution
     try {
       await refundChallenge(c._id.toString(), { noShow: true });
       refunded++;
@@ -298,5 +282,5 @@ export async function sweepResolutions(): Promise<{ finalized: number; refunded:
     }
   }
 
-  return { finalized, refunded };
+  return { refunded };
 }
