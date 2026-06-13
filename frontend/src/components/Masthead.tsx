@@ -38,15 +38,15 @@ export function Masthead() {
               Profile
             </Link>
           )}
+          <UserSearch />
+          <WalletMultiButton />
           <Link
             href="/post/new"
             title="New post"
-            className="inline-flex items-center justify-center h-9 w-9 bg-ink text-paper border border-ink hover:bg-accent hover:border-accent transition-colors"
+            className="inline-flex shrink-0 aspect-square items-center justify-center h-12 w-12 bg-ink text-paper border border-ink hover:bg-accent hover:border-accent transition-colors"
           >
-            <Plus className="h-5 w-5" strokeWidth={2.5} />
+            <Plus className="h-7 w-7" strokeWidth={2.5} />
           </Link>
-          <UserSearch />
-          <WalletMultiButton />
         </nav>
       </div>
 
