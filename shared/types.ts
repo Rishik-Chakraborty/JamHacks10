@@ -511,4 +511,6 @@ export const API_ROUTES = {
   // comments
   listComments: 'GET /api/challenges/:id/comments',
   createComment: 'POST /api/comments',
+  // demo
+  runDemoBots: 'POST /api/demo/bots/:id',
 } as const;

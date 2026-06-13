@@ -9,6 +9,7 @@ import { photosRouter, challengePhotosRouter } from './photos';
 import { betsRouter, challengeBetsRouter, userPositionsRouter } from './bets';
 import { feedRouter, photoLikeRouter, profileRouter } from './feed';
 import { commentsRouter, challengeCommentsRouter } from './comments';
+import { demoRouter } from './demo';
 
 export function mountRoutes(app: Express): void {
   app.use('/api/feed', feedRouter);
@@ -28,4 +29,5 @@ export function mountRoutes(app: Express): void {
   app.use('/api/photos', photosRouter);
   app.use('/api/bets', betsRouter);
   app.use('/api/comments', commentsRouter);
+  app.use('/api/demo', demoRouter);
 }
