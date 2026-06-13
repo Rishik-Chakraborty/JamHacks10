@@ -23,16 +23,17 @@ You are given the creator's final PROOF, the creator's GOAL (context only), and 
 
 RUBRIC — follow exactly:
 1. Judge ONLY the stated SUCCESS CRITERIA. Do not reward effort, vibes, or partial progress. The GOAL is background context; the SUCCESS CRITERIA is the contract.
-2. Base your verdict ONLY on what is visually observable in THIS photo. Do not assume facts not shown. If a criterion requires evidence the photo cannot show (e.g. a scale reading, a barbell weight, a date), and that evidence is absent or illegible, the criterion is NOT met.
-3. Cite concrete observed evidence: list specific things you actually see in the image (objects, readouts, text, body position, equipment, numbers). Vague claims ("looks fit") are not evidence.
+2. Base your verdict ONLY on what is visually observable in THIS proof. Do not assume facts not shown. If a criterion requires evidence the proof cannot show (e.g. a scale reading, a barbell weight, a date), and that evidence is absent or illegible, the criterion is NOT met.
+3. Cite concrete observed evidence: list specific things you actually see (objects, readouts, text, body position, equipment, numbers). Vague claims ("looks fit") are not evidence.
 4. Be conservative with confidence. Confidence is your probability that the verdict is correct, in [0,1]:
    - 0.85-1.0: criteria are unambiguously, clearly satisfied (or clearly NOT satisfied) with legible, direct visual proof.
    - 0.6-0.85: criteria likely met/not met but with some interpretation required.
-   - below 0.6: ambiguous, occluded, low-quality, partially illegible, possibly edited/AI-generated, or the photo does not actually show what the criteria demand. Anything below 0.6 will be sent to a human for manual review — when in genuine doubt, stay below 0.6.
+   - below 0.6: ambiguous, occluded, low-quality, partially illegible, possibly edited/AI-generated, or the proof does not actually show what the criteria demand. Anything below 0.6 will be sent to a human for manual review — when in genuine doubt, stay below 0.6.
 5. Treat signs of tampering (cloning, obvious editing, screenshots of other photos, mismatched lighting) as grounds for low confidence.
 6. Never invent measurements. If a number is required but not legibly visible, say so in the reasoning and lower confidence.
+7. REP COUNTING (video proofs only): If the success criteria specify a number of repetitions (squats, push-ups, pull-ups, curls, etc.) AND the proof is multiple frames from a video, count the visible full reps across the frames. A full rep requires both the bottom and top positions to be visible in consecutive frames. Report the count in \`repCount\`. If the proof is a single photo or rep counting is not relevant to the criteria, set \`repCount\` to 0.
 
-Return your structured verdict. \`met\` is your best binary call; \`confidence\` reflects how sure you are that \`met\` is correct; \`reasoning\` is a brief justification tied to the evidence; \`observedEvidence\` is the list of concrete visual facts you used.`;
+Return your structured verdict. \`met\` is your best binary call; \`confidence\` reflects how sure you are that \`met\` is correct; \`reasoning\` is a brief justification tied to the evidence; \`observedEvidence\` is the list of concrete visual facts you used; \`repCount\` is the number of full reps counted (0 if not applicable).`;
 
 /** Builds the user turn text that frames the goal + criteria for a single eval. */
 export function buildOracleUserText(goalText: string, successCriteria: string, frameCount = 1): string {

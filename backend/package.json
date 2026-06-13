@@ -7,10 +7,13 @@
     "build": "tsc",
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
-    "seed": "tsx src/seed.ts"
+    "seed": "tsx src/seed.ts",
+    "test:ai": "tsx tests/ai-evaluation.test.ts",
+    "train:xgboost": "tsx -e \"import('./src/services/ai/xgboost-trainer').then(m => m.trainAndSave())\""
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.30.1",
+    "@google/generative-ai": "^0.24.1",
     "@solana/web3.js": "^1.95.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

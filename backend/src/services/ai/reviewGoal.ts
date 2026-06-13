@@ -48,13 +48,13 @@ function client(): OpenAI {
  * demo). A clean rejection returns `{ approved: false, feedback }`.
  */
 export async function reviewGoal(params: ReviewGoalParams): Promise<GoalReview> {
-  if (!env.aiEnabled) {
+  if (!env.commentaryEnabled) {
     throw new Error('AI reviewer not configured: set OPENAI_API_KEY to enable custom-goal review.');
   }
 
   const completion = await client().beta.chat.completions.parse({
-    // Reviewing text is cheap — use the commentary model when set, else the vision model.
-    model: env.OPENAI_COMMENTARY_MODEL || env.OPENAI_VISION_MODEL,
+    // Reviewing text is cheap — use the commentary model.
+    model: env.OPENAI_COMMENTARY_MODEL,
     messages: [
       { role: 'system', content: GOAL_REVIEW_SYSTEM_PROMPT },
       {
