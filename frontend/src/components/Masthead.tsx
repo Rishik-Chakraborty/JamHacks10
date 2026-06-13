@@ -1,15 +1,18 @@
 'use client';
 
 import Link from 'next/link';
-import dynamic from 'next/dynamic';
-
-// Wallet button is browser-only — load client-side to avoid hydration mismatch.
-const WalletMultiButton = dynamic(
-  () => import('@solana/wallet-adapter-react-ui').then((m) => m.WalletMultiButton),
-  { ssr: false, loading: () => <span className="label">connect…</span> },
-);
+import { usePathname } from 'next/navigation';
 
 export function Masthead() {
+  const path = usePathname();
+
+  const links = [
+    { href: '/', label: 'Feed' },
+    { href: '/lines', label: 'Lines' },
+    { href: '/profile', label: 'Profile' },
+    { href: '/admin', label: 'Admin' },
+  ];
+
   return (
     <header className="bg-paper sticky top-0 z-30">
       <div className="max-w-6xl mx-auto px-5 py-3 flex items-end justify-between gap-4">
@@ -21,16 +24,17 @@ export function Masthead() {
         </Link>
 
         <nav className="flex items-center gap-5 pb-1">
-          <Link href="/" className="display uppercase text-base text-ink hover:text-accent transition-colors">
-            Markets
-          </Link>
-          <Link
-            href="/create"
-            className="display uppercase text-base text-ink hover:text-accent transition-colors"
-          >
-            Open a Line
-          </Link>
-          <WalletMultiButton />
+          {links.map((l) => (
+            <Link
+              key={l.href}
+              href={l.href}
+              className={`display uppercase text-base transition-colors ${
+                path === l.href ? 'text-accent' : 'text-ink hover:text-accent'
+              }`}
+            >
+              {l.label}
+            </Link>
+          ))}
         </nav>
       </div>
 

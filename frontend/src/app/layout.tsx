@@ -1,14 +1,11 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Archivo } from "next/font/google";
 import "./globals.css";
-import { Providers } from "@/components/Providers";
 import { Masthead } from "@/components/Masthead";
-import { Ticker } from "@/components/Ticker";
+import { Providers } from "@/components/Providers";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
-// Archivo family at black weights — the "Archivo Black" headline look, with a
-// usable weight range so buttons/labels render properly (no synthetic bold).
 const archivo = Archivo({
   variable: "--font-archivo",
   subsets: ["latin"],
@@ -31,7 +28,6 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <Providers>
           <Masthead />
           <main className="flex-1 w-full pb-16">{children}</main>
-          <Ticker />
         </Providers>
       </body>
     </html>
