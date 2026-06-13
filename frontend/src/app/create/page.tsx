@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { CreateChallengeForm } from '@/components/CreateChallengeForm';
 
 export const metadata: Metadata = {
-  title: 'Open a Line — GymCast',
+  title: 'Open a Line — gainsXchange',
   description: 'Put a fitness goal on the board and let the market call your bluff.',
 };
 

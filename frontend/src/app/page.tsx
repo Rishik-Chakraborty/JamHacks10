@@ -10,7 +10,7 @@ import { Heart, MessageSquare, Flame, User } from 'lucide-react';
 const POSTS = [
   {
     id: 'post-3',
-    user: 'GymBroGreg',
+    user: 'Ryan',
     avatar: '💪',
     date: 'Sep 15, 2025',
     timeAgo: '3mo ago',
@@ -22,7 +22,7 @@ const POSTS = [
   },
   {
     id: 'post-2',
-    user: 'GymBroGreg',
+    user: 'Ryan',
     avatar: '💪',
     date: 'May 3, 2025',
     timeAgo: '8mo ago',
@@ -34,7 +34,7 @@ const POSTS = [
   },
   {
     id: 'post-1',
-    user: 'GymBroGreg',
+    user: 'Ryan',
     avatar: '💪',
     date: 'Jan 1, 2025',
     timeAgo: '12mo ago',

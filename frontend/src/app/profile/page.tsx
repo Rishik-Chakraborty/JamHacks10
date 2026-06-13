@@ -52,7 +52,7 @@ export default function ProfilePage() {
               CREATOR
             </span>
           </div>
-          <p className="text-sm text-muted font-mono mb-4">@GymBroGreg • 0x8f...7e34</p>
+          <p className="text-sm text-muted font-mono mb-4">@ryan • 0x8f...7e34</p>
           
           <div className="grid grid-cols-3 gap-4 border-t border-line pt-4 max-w-sm mx-auto sm:mx-0">
             <div>

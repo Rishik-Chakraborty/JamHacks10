@@ -17,8 +17,8 @@ export function Masthead() {
     <header className="bg-paper sticky top-0 z-30">
       <div className="max-w-6xl mx-auto px-5 py-3 flex items-end justify-between gap-4">
         <Link href="/" className="group">
-          <div className="display text-4xl sm:text-5xl text-ink leading-none">
-            Gym<span className="text-accent">Cast</span>
+          <div className="display text-4xl sm:text-5xl text-ink leading-none tracking-normal">
+            gains<span className="text-accent">X</span>change
           </div>
           <div className="label mt-1">The Fitness Prediction Market</div>
         </Link>

@@ -15,7 +15,7 @@ const LINES = [
   {
     id: 'line-1',
     title: 'Will his abs be visible by the end of the year?',
-    creator: 'GymBroGreg',
+    creator: 'Ryan',
     status: 'active' as const,
     deadline: 'Dec 31, 2025',
     impliedYes: 0.6038,

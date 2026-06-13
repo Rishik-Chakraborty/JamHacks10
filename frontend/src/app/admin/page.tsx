@@ -29,7 +29,7 @@ const BETTORS = [
   },
   {
     wallet: '7gymBRoX…uVwXy',
-    username: 'GymBroGreg',
+    username: 'Ryan',
     side: 'yes' as const,
     stake: 2.0,
     payout: 3.31,

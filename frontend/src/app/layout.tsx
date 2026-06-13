@@ -13,7 +13,7 @@ const archivo = Archivo({
 });
 
 export const metadata: Metadata = {
-  title: "GymCast — Fitness Prediction Markets",
+  title: "gainsXchange — Fitness Prediction Markets",
   description:
     "Back your discipline or doubt theirs. Public fitness goals, parimutuel markets, settled on Solana.",
 };
