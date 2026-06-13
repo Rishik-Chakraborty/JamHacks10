@@ -39,6 +39,13 @@ const RULES = [
   { k: 'AI oracle', t: 'Proof, not promises', d: 'A vision model judges the final evidence against precise success criteria. Low-confidence calls go to human review before settlement.' },
 ];
 
+const ORACLE_EVIDENCE = [
+  'Final proof image submitted',
+  'Success criteria loaded',
+  'Vision verdict returned',
+  'MongoDB challenge resolved',
+];
+
 export default function HomePage() {
   return (
     <div>
@@ -118,6 +125,88 @@ export default function HomePage() {
 
       {/* ---------------- LIVE STATS (full-bleed ink band) ---------------- */}
       <StatsBand />
+
+      {/* ---------------- AI ORACLE DEMO ---------------- */}
+      <section className="max-w-6xl mx-auto px-5 py-12">
+        <div className="grid lg:grid-cols-12 gap-px bg-line border-2 border-ink">
+          <div className="lg:col-span-5 bg-ink text-paper p-6 sm:p-8 flex flex-col justify-between">
+            <div>
+              <p className="label text-paper/70">Live judge demo</p>
+              <h2 className="display text-4xl sm:text-5xl mt-3 leading-none">
+                The AI does not guess. It cites proof.
+              </h2>
+              <p className="text-sm text-paper/75 leading-relaxed mt-5 max-w-md">
+                GymCast sends the final check-in photo plus the written success criteria to a vision
+                oracle. The response is structured, evidence-backed, and confidence-gated before
+                payout.
+              </p>
+            </div>
+            <Link
+              href="/challenge/6a2d66aea1b9d1785e84b4e7"
+              className="inline-flex h-12 items-center justify-center px-6 mt-7 bg-accent text-paper border border-accent font-display uppercase tracking-wide text-lg hover:bg-accent-deep transition-colors"
+            >
+              Open resolved proof
+            </Link>
+          </div>
+
+          <div className="lg:col-span-7 bg-card p-6 sm:p-8">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-ink pb-3">
+              <div>
+                <p className="label">Oracle verdict</p>
+                <h3 className="display text-2xl text-ink mt-1">Red square proof check</h3>
+              </div>
+              <Tag tone="accent" solid>
+                Resolved YES
+              </Tag>
+            </div>
+
+            <div className="grid sm:grid-cols-3 gap-px bg-line border border-line mt-5">
+              <div className="bg-paper p-4">
+                <p className="label">Outcome</p>
+                <p className="display text-3xl text-yes mt-2">Met</p>
+              </div>
+              <div className="bg-paper p-4">
+                <p className="label">Confidence</p>
+                <p className="num text-3xl text-ink mt-2">0.90</p>
+              </div>
+              <div className="bg-paper p-4">
+                <p className="label">Review</p>
+                <p className="display text-3xl text-ink mt-2">Auto</p>
+              </div>
+            </div>
+
+            <div className="grid md:grid-cols-[0.9fr_1.1fr] gap-6 mt-6">
+              <div className="border border-ink bg-paper p-4">
+                <div className="aspect-square border-2 border-ink bg-red-600 flex items-center justify-center">
+                  <span className="display text-3xl text-paper text-center leading-none">
+                    Final
+                    <br />
+                    proof
+                  </span>
+                </div>
+              </div>
+              <div>
+                <p className="label">Observed evidence</p>
+                <ul className="mt-3 space-y-2">
+                  {ORACLE_EVIDENCE.map((item) => (
+                    <li key={item} className="flex gap-3 text-sm text-ink-2">
+                      <span className="num text-accent">OK</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="rule pt-4 mt-5">
+                  <p className="text-sm text-ink-2 leading-relaxed">
+                    Verdict reasoning: the final image clearly shows a red square filling most of
+                    the frame, so the challenge resolves YES. Ambiguous proof routes to manual
+                    review instead of settling the market.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* ---------------- HOW THE HOUSE RUNS — both perspectives ---------------- */}
       <section className="max-w-6xl mx-auto px-5 py-12">
