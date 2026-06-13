@@ -1,40 +1,36 @@
-import type { Metadata } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
-import './globals.css';
-import { Providers } from '@/components/Providers';
-import { Nav } from '@/components/Nav';
-import { Ticker } from '@/components/Ticker';
+import type { Metadata } from "next";
+import { Geist, Geist_Mono, Archivo } from "next/font/google";
+import "./globals.css";
+import { Providers } from "@/components/Providers";
+import { Masthead } from "@/components/Masthead";
+import { Ticker } from "@/components/Ticker";
 
-const geistSans = Geist({
-  variable: '--font-geist-sans',
-  subsets: ['latin'],
-});
-
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
+const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
+const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
+// Archivo family at black weights — the "Archivo Black" headline look, with a
+// usable weight range so buttons/labels render properly (no synthetic bold).
+const archivo = Archivo({
+  variable: "--font-archivo",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800", "900"],
 });
 
 export const metadata: Metadata = {
-  title: 'GymCast',
+  title: "GymCast — Fitness Prediction Markets",
   description:
-    'BeReal × Polymarket for fitness — set a goal, post daily, let the crowd bet on whether you crush it.',
+    "Back your discipline or doubt theirs. Public fitness goals, parimutuel markets, settled on Solana.",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${archivo.variable}`}
     >
-      <body className="min-h-full flex flex-col font-sans">
+      <body className="min-h-screen flex flex-col bg-paper text-ink">
         <Providers>
-          <Nav />
-          <main className="flex flex-1 flex-col pb-10">{children}</main>
+          <Masthead />
+          <main className="flex-1 w-full pb-16">{children}</main>
           <Ticker />
         </Providers>
       </body>

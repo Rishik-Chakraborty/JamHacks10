@@ -1,303 +1,349 @@
-/**
- * CreateChallengeForm — react-hook-form + zod form that creates a challenge,
- * then (best-effort) initializes its on-chain parimutuel market.
- *
- * Flow on submit:
- *   1. api.createChallenge(body) -> new Challenge (always happens).
- *   2. Best-effort api.createUser for the connected wallet (ignore failure).
- *   3. If NEXT_PUBLIC_PROGRAM_ID + NEXT_PUBLIC_ORACLE_AUTHORITY are set AND a
- *      wallet is connected: initializeMarket(...) then api.attachMarket(...).
- *      Any chain failure is caught and surfaced WITHOUT losing the challenge.
- *   4. Redirect to /challenge/[id].
- *
- * On-chain is wrapped in @/lib/market's `initializeMarket`, which throws a
- * typed MarketClientError when the program id / wallet are missing — we treat
- * those as a graceful skip ("betting opens once the market is deployed").
- */
 'use client';
 
 import { useState } from 'react';
+import { useForm } from 'react-hook-form';
 import { useRouter } from 'next/navigation';
-import { useForm, type Resolver } from 'react-hook-form';
+import dynamic from 'next/dynamic';
 import { z } from 'zod';
-import { useAnchorWallet, useConnection, useWallet } from '@solana/wallet-adapter-react';
-import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
+import { useWallet, useConnection, useAnchorWallet } from '@solana/wallet-adapter-react';
 import { api } from '@/lib/api';
-import { initializeMarket, MarketClientError } from '@/lib/market';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
+import { shortWallet } from '@/lib/format';
 import type { CreateChallengeBody, MetricType } from '@/types/contract';
+import { Button } from '@/components/ui/Button';
+import { Panel } from '@/components/ui/Panel';
+import { Tag } from '@/components/ui/Tag';
 
-const METRIC_OPTIONS: { value: MetricType; label: string; help: string }[] = [
-  { value: 'visual', label: 'Visual (photo)', help: 'Judged from your final photo' },
-  { value: 'weight', label: 'Bodyweight', help: 'A target bodyweight in your final photo' },
-  { value: 'bench', label: 'Bench / lift', help: 'A target lift shown in your final photo' },
+// Wallet button is browser-only — load client-side to avoid hydration mismatch.
+const WalletMultiButton = dynamic(
+  () => import('@solana/wallet-adapter-react-ui').then((m) => m.WalletMultiButton),
+  { ssr: false, loading: () => <span className="label">connect…</span> },
+);
+
+/* ---------------------------------------------------------------------------
+ * Form shape + validation. We avoid @hookform/resolvers (not installed) and
+ * instead parse the raw values through zod inside onSubmit.
+ * ------------------------------------------------------------------------ */
+
+interface FormValues {
+  title: string;
+  goalText: string;
+  successCriteria: string;
+  metricType: MetricType;
+  deadline: string; // value of <input type="datetime-local"> (local, no tz)
+}
+
+const METRICS: { value: MetricType; label: string; hint: string }[] = [
+  { value: 'weight', label: 'Weight', hint: 'Bodyweight / scale reading' },
+  { value: 'bench', label: 'Bench', hint: 'Logged lift number' },
+  { value: 'visual', label: 'Visual', hint: 'Judged from a photo' },
 ];
 
 const schema = z.object({
-  title: z.string().trim().min(3, 'Give it a title (3+ chars)').max(120, 'Too long'),
-  goalText: z.string().trim().min(5, 'Describe the goal (5+ chars)').max(280, 'Too long'),
+  title: z.string().trim().min(4, 'Give it a punchy title (4+ chars).').max(120, 'Keep the title under 120 chars.'),
+  goalText: z
+    .string()
+    .trim()
+    .min(10, 'Describe the goal in a sentence (10+ chars).')
+    .max(600, 'Keep the goal under 600 chars.'),
   successCriteria: z
     .string()
     .trim()
-    .min(10, 'Be precise — the AI judges exactly this (10+ chars)')
-    .max(500, 'Too long'),
+    .min(10, 'Spell out exactly how the judge decides (10+ chars).')
+    .max(600, 'Keep the criteria under 600 chars.'),
   metricType: z.enum(['weight', 'bench', 'visual']),
-  // datetime-local value (no timezone); validated to be in the future.
   deadline: z
     .string()
-    .min(1, 'Pick a deadline')
-    .refine((v) => {
-      const t = Date.parse(v);
-      return !Number.isNaN(t) && t > Date.now();
-    }, 'Deadline must be in the future'),
+    .min(1, 'Set a deadline.')
+    .refine((v) => !Number.isNaN(Date.parse(v)), 'That date is unreadable.')
+    .refine((v) => new Date(v).getTime() > Date.now(), 'The deadline must be in the future.'),
 });
 
-type FormValues = z.infer<typeof schema>;
+/** Local datetime-local string -> ISO. */
+function toIso(localDatetime: string): string {
+  return new Date(localDatetime).toISOString();
+}
 
-/** Minimal zod resolver (the repo has no @hookform/resolvers dep). */
-const zodResolver =
-  (s: typeof schema): Resolver<FormValues> =>
-  async (values) => {
-    const result = s.safeParse(values);
-    if (result.success) return { values: result.data, errors: {} };
-    const errors: Record<string, { type: string; message: string }> = {};
-    for (const issue of result.error.issues) {
-      const key = issue.path[0];
-      if (typeof key === 'string' && !errors[key]) {
-        errors[key] = { type: issue.code, message: issue.message };
-      }
-    }
-    return { values: {}, errors: errors as never };
-  };
+/** Min for the datetime-local input: ~5 min out, formatted as local YYYY-MM-DDTHH:mm. */
+function minDatetimeLocal(): string {
+  const d = new Date(Date.now() + 5 * 60_000);
+  const off = d.getTimezoneOffset() * 60_000;
+  return new Date(d.getTime() - off).toISOString().slice(0, 16);
+}
 
-/** Deterministic <=32-byte slug derived from the challenge id (FNV-1a hex). */
+/** FNV-1a (32-bit) hash -> 8 hex chars. Deterministic, <=32-byte slug with 'gc' prefix. */
 function slugFromId(id: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < id.length; i++) {
     h ^= id.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
-  // 8 hex chars, prefixed so it's a readable, stable seed well under 32 bytes.
-  return `gc${(h >>> 0).toString(16).padStart(8, '0')}`;
+  return 'gc' + (h >>> 0).toString(16).padStart(8, '0');
 }
-
-const PROGRAM_ID = process.env.NEXT_PUBLIC_PROGRAM_ID ?? '';
-const ORACLE_AUTHORITY = process.env.NEXT_PUBLIC_ORACLE_AUTHORITY ?? '';
 
 export function CreateChallengeForm() {
   const router = useRouter();
+  const { publicKey } = useWallet();
   const { connection } = useConnection();
   const anchorWallet = useAnchorWallet();
-  const { publicKey, connected } = useWallet();
 
   const [submitting, setSubmitting] = useState(false);
-  const [chainNote, setChainNote] = useState<string | null>(null);
-  const [topError, setTopError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [marketNote, setMarketNote] = useState<string | null>(null);
 
   const {
     register,
     handleSubmit,
+    setError,
     formState: { errors },
   } = useForm<FormValues>({
-    resolver: zodResolver(schema),
-    defaultValues: { metricType: 'visual' },
+    defaultValues: { title: '', goalText: '', successCriteria: '', metricType: 'visual', deadline: '' },
   });
 
-  const walletReady = connected && !!publicKey;
-  const chainConfigured = !!PROGRAM_ID && !!ORACLE_AUTHORITY;
+  const wallet = publicKey?.toBase58() ?? null;
 
-  const onSubmit = handleSubmit(async (values) => {
-    setSubmitting(true);
-    setTopError(null);
-    setChainNote(null);
+  /* ---- Wallet gate: show a connect prompt instead of the form body. ---- */
+  if (!wallet) {
+    return (
+      <div className="grid lg:grid-cols-12 gap-8 lg:gap-10">
+        <div className="lg:col-span-8">
+          <Panel className="p-8">
+            <p className="label">Step One</p>
+            <h2 className="display text-3xl text-ink mt-2">Connect a wallet to open a line</h2>
+            <p className="text-sm text-ink-2 mt-2 max-w-md">
+              Your connected wallet signs the market into existence and is recorded as the athlete on
+              the card. Connect to continue.
+            </p>
+            <div className="mt-5">
+              <WalletMultiButton />
+            </div>
+          </Panel>
+        </div>
+        <HowItWorks />
+      </div>
+    );
+  }
 
-    const creatorWallet = publicKey ? publicKey.toBase58() : 'unknown';
+  const onSubmit = async (values: FormValues) => {
+    setSubmitError(null);
+    setMarketNote(null);
 
-    try {
-      const body: CreateChallengeBody = {
-        creatorWallet,
-        title: values.title.trim(),
-        goalText: values.goalText.trim(),
-        successCriteria: values.successCriteria.trim(),
-        metricType: values.metricType,
-        deadline: new Date(values.deadline).toISOString(),
-      };
-
-      // 1. Create the challenge (authoritative — must not be lost on chain errors).
-      const challenge = await api.createChallenge(body);
-
-      // 2. Best-effort: upsert the connected user.
-      if (publicKey) {
-        try {
-          await api.createUser({
-            wallet: publicKey.toBase58(),
-            username: `${publicKey.toBase58().slice(0, 4)}…${publicKey.toBase58().slice(-4)}`,
-          });
-        } catch {
-          /* non-fatal */
+    // Manual zod parse — surface field errors inline, mirror to react-hook-form.
+    const parsed = schema.safeParse(values);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        const field = issue.path[0];
+        if (typeof field === 'string') {
+          setError(field as keyof FormValues, { type: 'manual', message: issue.message });
         }
       }
+      return;
+    }
 
-      // 3. Best-effort on-chain market init.
-      if (chainConfigured && walletReady && anchorWallet) {
+    const v = parsed.data;
+    const body: CreateChallengeBody = {
+      creatorWallet: wallet,
+      title: v.title,
+      goalText: v.goalText,
+      successCriteria: v.successCriteria,
+      metricType: v.metricType,
+      deadline: toIso(v.deadline),
+    };
+
+    setSubmitting(true);
+    try {
+      const challenge = await api.createChallenge(body);
+
+      // Best-effort: register the creator as a user. Never blocks the flow.
+      await api.createUser({ wallet, username: shortWallet(wallet) }).catch(() => {});
+
+      // On-chain market init — degrade gracefully if not deployed/connected.
+      const programId = process.env.NEXT_PUBLIC_PROGRAM_ID;
+      const authority = process.env.NEXT_PUBLIC_ORACLE_AUTHORITY;
+      if (programId && authority && anchorWallet) {
         try {
+          const { initializeMarket } = await import('@/lib/market');
+          const slug = slugFromId(challenge.id);
           const { marketPda, vaultPda } = await initializeMarket({
             connection,
             wallet: anchorWallet,
-            slug: slugFromId(challenge.id),
+            slug,
             deadline: body.deadline,
-            authority: ORACLE_AUTHORITY,
+            authority,
           });
-          await api.attachMarket(challenge.id, {
-            marketPda,
-            vaultPda,
-            programId: PROGRAM_ID,
-          });
-        } catch (chainErr) {
-          // Challenge already exists — surface the chain issue but still redirect.
-          if (chainErr instanceof MarketClientError) {
-            setChainNote(chainErr.message);
-          } else {
-            setChainNote(
-              chainErr instanceof Error
-                ? `Market not deployed: ${chainErr.message}`
-                : 'Market init failed — you can deploy it later.',
-            );
-          }
+          await api.attachMarket(challenge.id, { marketPda, vaultPda, programId });
+        } catch {
+          // A MarketClientError (NO_PROGRAM/NO_WALLET) or any chain failure must
+          // NOT lose the created challenge — note it and continue to the page.
+          setMarketNote('market step skipped — betting opens once deployed');
         }
       } else {
-        setChainNote(
-          !chainConfigured
-            ? 'Program not configured — betting opens once the market is deployed.'
-            : 'Connect a wallet to deploy the betting market — challenge saved either way.',
-        );
+        setMarketNote('market step skipped — betting opens once deployed');
       }
 
-      // 4. Redirect to the new challenge.
       router.push(`/challenge/${challenge.id}`);
     } catch (err) {
-      setTopError(
-        err instanceof Error ? err.message : 'Something went wrong creating the challenge.',
-      );
+      setSubmitError(err instanceof Error ? err.message : 'Could not open the line. Try again.');
       setSubmitting(false);
     }
-  });
+  };
+
+  const fieldErr = (msg?: string) =>
+    msg ? <p className="text-xs text-no mt-1.5">{msg}</p> : null;
 
   return (
-    <Card className="p-6">
-      <form onSubmit={onSubmit} className="flex flex-col gap-5" noValidate>
-        {topError && (
-          <div className="flex items-start gap-2 rounded-xl border border-no/40 bg-no/10 p-3 text-sm text-no">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{topError}</span>
+    <div className="grid lg:grid-cols-12 gap-8 lg:gap-10">
+      {/* Left column — the form */}
+      <form className="lg:col-span-8" onSubmit={handleSubmit(onSubmit)} noValidate>
+        <Panel className="p-6 sm:p-8">
+          <div className="flex items-center justify-between">
+            <p className="label">The Terms</p>
+            <Tag tone="muted">Athlete · {shortWallet(wallet)}</Tag>
           </div>
-        )}
 
-        {/* Title */}
-        <Field label="Title" error={errors.title?.message}>
-          <input
-            {...register('title')}
-            placeholder="Lose 5kg by July"
-            className={inputClass}
-          />
-        </Field>
-
-        {/* Goal */}
-        <Field label="Goal" error={errors.goalText?.message}>
-          <textarea
-            {...register('goalText')}
-            rows={2}
-            placeholder="Drop from 80kg to 75kg with daily progress photos."
-            className={inputClass}
-          />
-        </Field>
-
-        {/* Success criteria */}
-        <Field
-          label="Success criteria"
-          hint="Precise, checkable — the AI judges THIS."
-          error={errors.successCriteria?.message}
-        >
-          <textarea
-            {...register('successCriteria')}
-            rows={3}
-            placeholder="Final photo shows a scale reading 75.0 kg or below, full body visible."
-            className={inputClass}
-          />
-        </Field>
-
-        {/* Metric type */}
-        <Field label="Metric type" error={errors.metricType?.message}>
-          <select {...register('metricType')} className={inputClass}>
-            {METRIC_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label} — {o.help}
-              </option>
-            ))}
-          </select>
-        </Field>
-
-        {/* Deadline */}
-        <Field label="Deadline" error={errors.deadline?.message}>
-          <input type="datetime-local" {...register('deadline')} className={inputClass} />
-        </Field>
-
-        {/* Wallet / chain status */}
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          {walletReady ? (
-            <Badge tone="brand">
-              <span className="font-mono">
-                {publicKey?.toBase58().slice(0, 4)}…{publicKey?.toBase58().slice(-4)}
-              </span>
-            </Badge>
-          ) : (
-            <Badge tone="warn">No wallet — connect to deploy the market</Badge>
-          )}
-          {!chainConfigured && (
-            <Badge tone="neutral">Program not configured · challenge-only</Badge>
-          )}
-        </div>
-
-        {chainNote && (
-          <div className="flex items-start gap-2 rounded-xl border border-border bg-surface-2/60 p-3 text-xs text-muted">
-            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
-            <span>{chainNote}</span>
+          {/* Title */}
+          <div className="mt-6">
+            <label htmlFor="title" className="label block">
+              Title
+            </label>
+            <input
+              id="title"
+              type="text"
+              placeholder="Drop to sub-12% body fat by August"
+              className="w-full bg-paper border border-line focus:border-ink outline-none px-3 h-11 mt-1.5 text-ink placeholder:text-faint"
+              {...register('title')}
+            />
+            {fieldErr(errors.title?.message)}
           </div>
-        )}
 
-        <Button type="submit" variant="accent" size="lg" disabled={submitting}>
-          {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-          {submitting ? 'Creating…' : 'Create Challenge'}
-        </Button>
+          {/* Goal */}
+          <div className="mt-5">
+            <label htmlFor="goalText" className="label block">
+              The Goal
+            </label>
+            <p className="text-xs text-faint mt-0.5">Plain-language pitch shown on the card.</p>
+            <textarea
+              id="goalText"
+              rows={3}
+              placeholder="Cut to single-digit body fat in eight weeks, training six days a week."
+              className="w-full bg-paper border border-line focus:border-ink outline-none px-3 py-2 mt-1.5 text-ink placeholder:text-faint resize-y"
+              {...register('goalText')}
+            />
+            {fieldErr(errors.goalText?.message)}
+          </div>
+
+          {/* Success criteria — load-bearing helper text. */}
+          <div className="mt-5 rule-ink pt-4">
+            <label htmlFor="successCriteria" className="label block text-ink">
+              Success Criteria
+            </label>
+            <p className="text-xs text-accent mt-0.5 font-semibold">
+              Be precise and checkable — the AI judge reads THIS at the deadline.
+            </p>
+            <textarea
+              id="successCriteria"
+              rows={3}
+              placeholder="Final photo shows visible abdominal definition; scale reads 175 lb or less."
+              className="w-full bg-paper border border-line focus:border-ink outline-none px-3 py-2 mt-1.5 text-ink placeholder:text-faint resize-y"
+              {...register('successCriteria')}
+            />
+            {fieldErr(errors.successCriteria?.message)}
+          </div>
+
+          {/* Metric + deadline */}
+          <div className="grid sm:grid-cols-2 gap-5 mt-6">
+            <div>
+              <span className="label block">Metric Type</span>
+              <div className="grid grid-cols-3 mt-1.5 border border-line divide-x divide-line">
+                {METRICS.map((m) => (
+                  <label
+                    key={m.value}
+                    className="flex flex-col items-center justify-center py-2.5 cursor-pointer has-[:checked]:bg-ink has-[:checked]:text-paper transition-colors"
+                    title={m.hint}
+                  >
+                    <input type="radio" value={m.value} className="sr-only" {...register('metricType')} />
+                    <span className="font-display uppercase tracking-wide text-sm">{m.label}</span>
+                  </label>
+                ))}
+              </div>
+              {fieldErr(errors.metricType?.message)}
+            </div>
+
+            <div>
+              <label htmlFor="deadline" className="label block">
+                Deadline
+              </label>
+              <input
+                id="deadline"
+                type="datetime-local"
+                min={minDatetimeLocal()}
+                className="num w-full bg-paper border border-line focus:border-ink outline-none px-3 h-11 mt-1.5 text-ink"
+                {...register('deadline')}
+              />
+              {fieldErr(errors.deadline?.message)}
+            </div>
+          </div>
+
+          {/* Submit + states */}
+          <div className="rule pt-5 mt-7">
+            {submitError ? (
+              <div className="border border-no bg-no-soft px-3 py-2 mb-4">
+                <p className="text-sm text-no">{submitError}</p>
+              </div>
+            ) : null}
+            {marketNote ? (
+              <div className="border border-line bg-paper-2 px-3 py-2 mb-4">
+                <p className="text-xs text-muted">{marketNote}</p>
+              </div>
+            ) : null}
+            <div className="flex items-center gap-4">
+              <Button type="submit" variant="accent" size="lg" disabled={submitting}>
+                {submitting ? 'Opening…' : 'Open the line'}
+              </Button>
+              <p className="label tracking-normal">
+                {submitting ? 'Signing & posting' : 'Posts to the board'}
+              </p>
+            </div>
+          </div>
+        </Panel>
       </form>
-    </Card>
+
+      <HowItWorks />
+    </div>
   );
 }
 
-const inputClass =
-  'w-full rounded-xl border border-border bg-surface-2 px-3 py-2 text-sm text-foreground placeholder:text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand';
-
-function Field({
-  label,
-  hint,
-  error,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  error?: string;
-  children: React.ReactNode;
-}) {
+/* --------------------------------------------------------------------------
+ * Right column — "How it works" aside.
+ * ----------------------------------------------------------------------- */
+function HowItWorks() {
+  const steps: { n: string; head: string; body: string }[] = [
+    { n: '01', head: 'Set the terms', body: 'Title, goal, and the exact criteria the judge will check.' },
+    { n: '02', head: 'Sign the market', body: 'Your wallet opens a parimutuel pool keyed to this line.' },
+    { n: '03', head: 'The board reacts', body: 'Spectators stake SOL on YES or NO. Odds move live.' },
+    { n: '04', head: 'The bell rings', body: 'At the deadline an AI judge reads your proof. Winners split the pot.' },
+  ];
   return (
-    <label className="flex flex-col gap-1.5">
-      <span className="flex items-baseline justify-between">
-        <span className="text-sm font-semibold">{label}</span>
-        {hint && <span className="text-xs text-muted">{hint}</span>}
-      </span>
-      {children}
-      {error && <span className="text-xs text-no">{error}</span>}
-    </label>
+    <aside className="lg:col-span-4">
+      <p className="label">How it works</p>
+      <div className="rule-accent pt-4 mt-2">
+        <dl className="space-y-5">
+          {steps.map((s) => (
+            <div key={s.n} className="flex gap-3">
+              <span className="num text-muted text-sm pt-0.5">{s.n}</span>
+              <div>
+                <dt className="font-display uppercase tracking-wide text-ink text-sm">{s.head}</dt>
+                <dd className="text-xs text-ink-2 mt-0.5 leading-relaxed">{s.body}</dd>
+              </div>
+            </div>
+          ))}
+        </dl>
+      </div>
+      <div className="rule pt-3 mt-5">
+        <p className="text-xs text-faint leading-relaxed">
+          Amounts settle in SOL. The judge is read-only and reads your final proof against the
+          success criteria — write them so a stranger could rule on them.
+        </p>
+      </div>
+    </aside>
   );
 }

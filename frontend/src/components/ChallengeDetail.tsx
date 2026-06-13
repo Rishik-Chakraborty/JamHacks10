@@ -1,82 +1,47 @@
-/**
- * ChallengeDetail — client view for a single challenge.
- *
- * - Loads the full ChallengeDetail via TanStack Query (api.getChallenge).
- * - Subscribes to the per-challenge Hype socket room (onHype) and merges live
- *   hypeScore / streak / misses / odds back into the query cache so every child
- *   (HypeMeter, market panel, BetModule) reflects realtime updates.
- * - Layout: header (title/goal/criteria/deadline/status); left column =
- *   progress chart + photo gallery (+ creator upload); right column = market
- *   panel mounting <BetModule/> and <ClaimButton/> (owned by the Bet agent).
- */
 'use client';
 
 import { useEffect } from 'react';
+import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Target, CalendarClock, ClipboardCheck, AlertTriangle } from 'lucide-react';
-import { Badge } from '@/components/ui/Badge';
-import { Card } from '@/components/ui/Card';
-import { Stat } from '@/components/ui/Stat';
-import { HypeMeter } from '@/components/HypeMeter';
-import { ProgressChart } from '@/components/ProgressChart';
-import { PhotoGallery } from '@/components/PhotoGallery';
-import { PhotoUpload } from '@/components/PhotoUpload';
-import { CommentsPanel } from '@/components/CommentsPanel';
-import { BetModule } from '@/components/BetModule';
-import { ClaimButton } from '@/components/ClaimButton';
+import type { ChallengeDetail as ChallengeDetailType } from '@/types/contract';
 import { api } from '@/lib/api';
 import { onHype } from '@/lib/socket';
-import { PROGRAM_ID_STR } from '@/lib/anchor';
-import { LAMPORTS_PER_SOL, type ChallengeDetail as ChallengeDetailDto } from '@/types/contract';
+import { Panel } from '@/components/ui/Panel';
+import { Tag } from '@/components/ui/Tag';
+import { Stat } from '@/components/ui/Stat';
+import { OddsBar } from '@/components/ui/OddsBar';
+import { formatSol, shortWallet, formatDate, timeUntil } from '@/lib/format';
+import { HypeMeter } from '@/components/HypeMeter';
+import { ProgressChart } from '@/components/ProgressChart';
+import { BetModule } from '@/components/BetModule';
+import { ClaimButton } from '@/components/ClaimButton';
+import { PhotoUpload } from '@/components/PhotoUpload';
+import { PhotoGallery } from '@/components/PhotoGallery';
+import { CommentsPanel } from '@/components/CommentsPanel';
 
-export interface ChallengeDetailProps {
-  id: string;
+/** Tale-of-the-tape meta cell: tracked micro-label over a value. */
+function MetaCell({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="px-4 first:pl-0">
+      <div className="label">{label}</div>
+      <div className="text-sm text-ink mt-1">{children}</div>
+    </div>
+  );
 }
 
-function sol(lamports: number): string {
-  return (lamports / LAMPORTS_PER_SOL).toLocaleString(undefined, {
-    maximumFractionDigits: 4,
-  });
-}
+export function ChallengeDetail({ id }: { id: string }) {
+  const qc = useQueryClient();
+  const queryKey = ['challenge', id] as const;
 
-function fmtDate(ts: string): string {
-  const d = new Date(ts);
-  return Number.isNaN(d.getTime())
-    ? ts
-    : d.toLocaleString(undefined, {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-      });
-}
-
-function deadlineHint(deadline: string, status: string): string {
-  if (status === 'resolved') return 'Resolved';
-  const ms = new Date(deadline).getTime() - Date.now();
-  if (Number.isNaN(ms)) return '';
-  if (ms <= 0) return 'Deadline passed — awaiting resolution';
-  const days = Math.floor(ms / 86_400_000);
-  const hours = Math.floor((ms % 86_400_000) / 3_600_000);
-  if (days > 0) return `${days}d ${hours}h left`;
-  const mins = Math.floor((ms % 3_600_000) / 60_000);
-  return hours > 0 ? `${hours}h ${mins}m left` : `${mins}m left`;
-}
-
-export function ChallengeDetail({ id }: ChallengeDetailProps) {
-  const queryClient = useQueryClient();
-
-  const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['challenge', id],
+  const { data, isLoading, isError, error, refetch } = useQuery<ChallengeDetailType>({
+    queryKey,
     queryFn: () => api.getChallenge(id),
-    refetchOnWindowFocus: false,
   });
 
-  // Live hype/odds updates → merge into the cached ChallengeDetail.
+  // Live hype/odds updates merged into the cached challenge.
   useEffect(() => {
     const off = onHype(id, (u) => {
-      queryClient.setQueryData<ChallengeDetailDto>(['challenge', id], (prev) =>
+      qc.setQueryData<ChallengeDetailType>(queryKey, (prev) =>
         prev
           ? {
               ...prev,
@@ -92,160 +57,176 @@ export function ChallengeDetail({ id }: ChallengeDetailProps) {
       );
     });
     return off;
-  }, [id, queryClient]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   if (isLoading) {
     return (
-      <div className="mx-auto w-full max-w-6xl px-4 py-16 text-center text-muted sm:px-6">
-        Loading challenge…
+      <div className="max-w-6xl mx-auto px-5 py-8">
+        <div className="h-10 w-2/3 bg-paper-2 animate-pulse" />
+        <div className="h-4 w-1/2 bg-paper-2 animate-pulse mt-3" />
+        <div className="grid lg:grid-cols-[1fr_22rem] gap-8 mt-8">
+          <div className="h-96 bg-card border border-line animate-pulse" />
+          <div className="h-96 bg-card border border-line animate-pulse" />
+        </div>
       </div>
     );
   }
 
-  if (isError || !data) {
+  if (isError) {
     return (
-      <div className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6">
-        <Card className="flex items-center gap-3 p-6 text-no">
-          <AlertTriangle className="h-5 w-5" />
-          {error instanceof Error ? error.message : 'Challenge not found.'}
-        </Card>
+      <div className="max-w-6xl mx-auto px-5 py-8">
+        <div className="border border-no bg-no-soft p-6">
+          <p className="display text-xl text-no">Couldn’t load this challenge</p>
+          <p className="text-sm text-ink-2 mt-1">
+            {error instanceof Error ? error.message : 'Request failed.'}
+          </p>
+          <button onClick={() => refetch()} className="label mt-3 underline hover:text-no">
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="max-w-6xl mx-auto px-5 py-8">
+        <div className="border border-line bg-card p-10 text-center">
+          <p className="display text-2xl text-ink">Line not found</p>
+          <p className="text-sm text-muted mt-2">
+            This challenge may have closed.{' '}
+            <Link href="/" className="underline hover:text-accent">
+              Back to the board
+            </Link>
+            .
+          </p>
+        </div>
       </div>
     );
   }
 
   const c = data;
+  const total = c.yesPoolLamports + c.noPoolLamports;
+  const { text: closes, ended } = timeUntil(c.deadline);
   const resolved = c.status === 'resolved';
-  const marketLive = !!PROGRAM_ID_STR && !!c.marketPda;
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8 sm:px-6">
-      {/* Header */}
-      <header className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge tone="brand">{c.metricType}</Badge>
+    <div className="max-w-6xl mx-auto px-5 py-8">
+      <Link href="/" className="label hover:text-accent">
+        ← The Board
+      </Link>
+
+      {/* HEADER band */}
+      <header className="mt-4 rule-accent pt-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="display text-5xl sm:text-6xl text-ink">{c.title}</h1>
+            <p className="text-ink-2 mt-2 max-w-2xl">{c.goalText}</p>
+          </div>
           {resolved ? (
-            <Badge tone={c.outcome === 'yes' ? 'yes' : c.outcome === 'no' ? 'no' : 'neutral'}>
-              {c.outcome ? `Resolved · ${c.outcome.toUpperCase()}` : 'Resolved'}
-            </Badge>
+            <Tag tone={c.outcome === 'yes' ? 'yes' : 'no'} solid className="shrink-0">
+              Settled {c.outcome ?? ''}
+            </Tag>
           ) : (
-            <Badge tone="accent" pulse>
-              Active
-            </Badge>
+            <span className="inline-flex items-center gap-1.5 shrink-0">
+              <span className="live-tick" />
+              <span className="label text-ink">Open</span>
+            </span>
           )}
         </div>
 
-        <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">{c.title}</h1>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="flex items-start gap-2 text-sm">
-            <Target className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
-            <span className="text-foreground">{c.goalText}</span>
-          </div>
-          <div className="flex items-start gap-2 text-sm">
-            <ClipboardCheck className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
-            <span className="text-muted">{c.successCriteria}</span>
-          </div>
+        {/* Tale of the tape */}
+        <div className="flex flex-wrap divide-x divide-line border-t border-line mt-5 pt-4">
+          <MetaCell label="Creator">
+            <span className="num">{shortWallet(c.creatorWallet)}</span>
+          </MetaCell>
+          <MetaCell label="Opened">
+            <span className="num">{formatDate(c.startDate)}</span>
+          </MetaCell>
+          <MetaCell label="Closes">
+            <span className={`num ${ended && !resolved ? 'text-accent' : ''}`}>
+              {resolved ? 'Closed' : closes}
+            </span>
+          </MetaCell>
+          <MetaCell label="Metric">
+            <span className="num uppercase">{c.metricType}</span>
+          </MetaCell>
         </div>
 
-        <div className="flex flex-wrap items-center gap-4 text-sm text-muted">
-          <span className="inline-flex items-center gap-1.5">
-            <CalendarClock className="h-4 w-4" />
-            Deadline {fmtDate(c.deadline)}
-          </span>
-          <Badge tone={resolved ? 'neutral' : 'warn'}>{deadlineHint(c.deadline, c.status)}</Badge>
-        </div>
+        {/* Winning condition aside */}
+        <aside className="border border-ink bg-paper-2 p-4 mt-5">
+          <div className="label text-ink">Winning Condition</div>
+          <p className="text-sm text-ink-2 mt-2">{c.successCriteria}</p>
+        </aside>
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
-        {/* Left: progress + photos */}
-        <div className="flex flex-col gap-6">
-          <Card className="flex flex-col gap-4 p-4">
-            <HypeMeter hypeScore={c.hypeScore} streak={c.streak} misses={c.misses} />
-          </Card>
-
-          <Card className="flex flex-col gap-3 p-4">
-            <h2 className="text-sm font-semibold">Progress</h2>
-            <ProgressChart metrics={c.metrics} metricType={c.metricType} />
-          </Card>
-
+      {/* Two-column body */}
+      <div className="grid lg:grid-cols-[1fr_22rem] gap-8 mt-8 items-start">
+        {/* LEFT */}
+        <div className="space-y-8">
+          <HypeMeter hypeScore={c.hypeScore} streak={c.streak} misses={c.misses} />
+          <ProgressChart metrics={c.metrics} metricType={c.metricType} />
           <PhotoUpload challenge={c} />
-
-          <Card className="flex flex-col gap-3 p-4">
-            <h2 className="text-sm font-semibold">Photos</h2>
-            <PhotoGallery photos={c.photos} />
-          </Card>
-
-          <CommentsPanel challengeId={c.id} comments={c.comments} />
+          <PhotoGallery photos={c.photos} />
+          <CommentsPanel challengeId={id} comments={c.comments} />
         </div>
 
-        {/* Right: market panel */}
-        <div className="flex flex-col gap-6">
-          <Card className="flex flex-col gap-4 p-4">
-            <h2 className="text-sm font-semibold">Market</h2>
+        {/* RIGHT — market panel */}
+        <aside className="lg:sticky lg:top-6">
+          <Panel className="p-5">
+            <h2 className="display text-2xl text-ink">The Market</h2>
+            <div className="rule-ink mt-2 pt-4">
+              <OddsBar impliedYes={c.impliedYes} labeled height={12} />
+            </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-px bg-line border border-line mt-5">
+              <Stat className="bg-card p-3" label="Yes pool" value={formatSol(c.yesPoolLamports)} tone="yes" hint="SOL" />
+              <Stat className="bg-card p-3" label="No pool" value={formatSol(c.noPoolLamports)} tone="no" hint="SOL" />
+              <Stat className="bg-card p-3" label="Total" value={formatSol(total)} hint="SOL" />
+            </div>
+
+            <div className="grid grid-cols-2 gap-px bg-line border border-line border-t-0 mt-px">
               <Stat
-                label="YES pool"
+                className="bg-card p-3"
+                label="Yes payout"
+                value={c.odds.yesMultiplier != null ? `${c.odds.yesMultiplier.toFixed(2)}×` : '—'}
                 tone="yes"
-                value={`${sol(c.odds.yesPoolLamports)} SOL`}
-                hint={`${Math.round(c.odds.impliedYes * 100)}% implied`}
               />
               <Stat
-                label="NO pool"
+                className="bg-card p-3"
+                label="No payout"
+                value={c.odds.noMultiplier != null ? `${c.odds.noMultiplier.toFixed(2)}×` : '—'}
                 tone="no"
-                value={`${sol(c.odds.noPoolLamports)} SOL`}
-                hint={`${Math.round(c.odds.impliedNo * 100)}% implied`}
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <Stat
-                label="YES payout"
-                value={c.odds.yesMultiplier ? `${c.odds.yesMultiplier.toFixed(2)}x` : '—'}
-              />
-              <Stat
-                label="NO payout"
-                value={c.odds.noMultiplier ? `${c.odds.noMultiplier.toFixed(2)}x` : '—'}
-              />
-            </div>
-
-            {!marketLive && (
-              <p className="rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
-                {PROGRAM_ID_STR
-                  ? 'Market not live yet — the creator needs to initialize it on-chain.'
-                  : 'On-chain market disabled — deploy the program and set NEXT_PUBLIC_PROGRAM_ID first.'}
-              </p>
-            )}
-
-            {/* Mounted from the Bet Module agent. They handle disabled/degraded states. */}
             <BetModule challenge={c} odds={c.odds} />
             <ClaimButton challenge={c} />
-          </Card>
 
-          <Card className="flex flex-col gap-3 p-4">
-            <h2 className="text-sm font-semibold">Recent bets</h2>
-            {c.recentBets.length === 0 ? (
-              <p className="text-sm text-muted">No bets yet.</p>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {c.recentBets.map((b) => (
-                  <li
-                    key={b.id}
-                    className="flex items-center justify-between rounded-lg bg-surface-2 px-3 py-2 text-sm"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Badge tone={b.side === 'yes' ? 'yes' : 'no'}>{b.side.toUpperCase()}</Badge>
-                      <span className="font-mono text-muted">
-                        {b.bettorWallet.slice(0, 4)}…{b.bettorWallet.slice(-4)}
+            {/* Recent bets */}
+            <div className="rule pt-4 mt-4">
+              <h3 className="label text-ink">Recent bets</h3>
+              {c.recentBets.length === 0 ? (
+                <p className="text-sm text-muted mt-2">No bets on the board yet.</p>
+              ) : (
+                <ul className="mt-2 divide-y divide-line">
+                  {c.recentBets.map((b) => (
+                    <li key={b.id} className="flex items-center justify-between py-2">
+                      <span className="num text-sm text-ink-2">{shortWallet(b.bettorWallet)}</span>
+                      <span className="flex items-center gap-2">
+                        <Tag tone={b.side === 'yes' ? 'yes' : 'no'}>{b.side}</Tag>
+                        <span className="num text-sm text-ink">
+                          {formatSol(b.amountLamports)} <span className="text-faint">SOL</span>
+                        </span>
                       </span>
-                    </span>
-                    <span className="font-semibold tabular-nums">{sol(b.amountLamports)} SOL</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </Panel>
+        </aside>
       </div>
     </div>
   );

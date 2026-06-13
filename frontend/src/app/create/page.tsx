@@ -1,30 +1,27 @@
-/**
- * /create — page shell for starting a new challenge. Server Component.
- * The interactive form (wallet + on-chain market init) is a client component.
- */
-import Link from 'next/link';
-import { Badge } from '@/components/ui/Badge';
+import type { Metadata } from 'next';
 import { CreateChallengeForm } from '@/components/CreateChallengeForm';
+
+export const metadata: Metadata = {
+  title: 'Open a Line — GymCast',
+  description: 'Put a fitness goal on the board and let the market call your bluff.',
+};
 
 export default function CreatePage() {
   return (
-    <div className="mx-auto w-full max-w-2xl px-4 py-12 sm:px-6">
-      <div className="mb-8 flex flex-col gap-3">
-        <Link href="/" className="text-sm text-muted hover:text-foreground">
-          ← Back to feed
-        </Link>
-        <div className="flex items-center gap-3">
-          <h1 className="text-3xl font-extrabold tracking-tight">
-            Start a <span className="text-gradient">Challenge</span>
-          </h1>
-          <Badge tone="accent">Parimutuel</Badge>
-        </div>
-        <p className="text-sm text-muted">
-          Put a fitness goal on the line. The crowd bets YES/NO and an AI oracle
-          settles the market when your deadline hits.
+    <div className="max-w-6xl mx-auto px-5">
+      {/* Masthead-style heading */}
+      <section className="py-8 border-b border-ink">
+        <p className="label">New Bout · The Card</p>
+        <h1 className="display text-5xl sm:text-6xl text-ink mt-2 max-w-3xl">Open a line</h1>
+        <p className="text-ink-2 text-sm leading-relaxed mt-3 max-w-2xl">
+          Declare a real fitness goal with a hard deadline. Spectators will stake SOL on whether you
+          deliver. At the bell, an AI judge reads your final proof against the criteria you set.
         </p>
-      </div>
-      <CreateChallengeForm />
+      </section>
+
+      <section className="py-7">
+        <CreateChallengeForm />
+      </section>
     </div>
   );
 }

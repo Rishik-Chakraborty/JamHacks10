@@ -1,235 +1,271 @@
-/**
- * PhotoUpload — creator-only progress photo poster.
- *
- * Flow: pick a file → read as a base64 data URL → draw it to a <canvas> with a
- * burned-in timestamp overlay (BeReal-style proof) → export the composited
- * canvas back to a data URL → submit via api.createPhoto. Optional metric value
- * + an "isFinal" toggle (the photo the AI oracle judges at the deadline).
- *
- * Only the challenge creator's connected wallet sees the control.
- */
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useRef, useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
-import { Camera, Upload, Loader2 } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
+import { useQueryClient } from '@tanstack/react-query';
+import type { Challenge, ChallengeDetail } from '@/types/contract';
 import { api } from '@/lib/api';
-import type { Challenge, Photo, CreatePhotoBody } from '@/types/contract';
+import { Panel } from '@/components/ui/Panel';
+import { Button } from '@/components/ui/Button';
+import { Tag } from '@/components/ui/Tag';
 
-export interface PhotoUploadProps {
-  challenge: Challenge;
-  className?: string;
+interface Props {
+  challenge: Challenge | ChallengeDetail;
 }
 
-/** Read a File into a base64 data URL. */
-function readAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error ?? new Error('Failed to read file'));
-    reader.readAsDataURL(file);
-  });
-}
+const MAX_SIDE = 1280;
+const JPEG_QUALITY = 0.85;
 
-/** Load an HTMLImageElement from a data URL. */
-function loadImage(src: string): Promise<HTMLImageElement> {
+/** Read a File into an HTMLImageElement via an object URL. */
+function loadImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
     const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Failed to decode image'));
-    img.src = src;
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Could not read that image.'));
+    };
+    img.src = url;
   });
 }
 
-/** Draw the source image to a canvas with a timestamp overlay; return JPEG data URL. */
-async function compositeWithTimestamp(
-  canvas: HTMLCanvasElement,
-  dataUrl: string,
-  capturedAt: Date,
-): Promise<string> {
-  const img = await loadImage(dataUrl);
-  // Cap the longest edge so payloads stay reasonable.
-  const MAX = 1280;
-  const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+/**
+ * Draw the image to a hidden canvas (capped to MAX_SIDE on the longest edge),
+ * burn a timestamp caption into the lower-left corner, and re-export as a JPEG
+ * data URL. Editorial caption: uppercase, hairline backing band.
+ */
+function processImage(img: HTMLImageElement, when: Date): { dataUrl: string; mimeType: string } {
+  const scale = Math.min(1, MAX_SIDE / Math.max(img.width, img.height));
   const w = Math.round(img.width * scale);
   const h = Math.round(img.height * scale);
+
+  const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
-
   const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Canvas 2D context unavailable');
+  if (!ctx) throw new Error('Canvas is not available in this browser.');
+
   ctx.drawImage(img, 0, 0, w, h);
 
-  const label = capturedAt.toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
+  // Timestamp caption, burned into the corner.
+  const caption = `${when
+    .toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    .toUpperCase()}  //  ${when.toLocaleTimeString('en-US', {
+    hour: '2-digit',
     minute: '2-digit',
-  });
-  const fontSize = Math.max(16, Math.round(w * 0.035));
-  ctx.font = `600 ${fontSize}px sans-serif`;
-  ctx.textBaseline = 'bottom';
-  const padding = Math.round(fontSize * 0.6);
-  const textWidth = ctx.measureText(label).width;
-  const boxH = fontSize + padding * 2;
+  })}`;
 
-  // Translucent backdrop strip bottom-left.
-  ctx.fillStyle = 'rgba(7, 6, 13, 0.6)';
-  ctx.fillRect(0, h - boxH, textWidth + padding * 2, boxH);
-  // GymCast accent tag.
-  ctx.fillStyle = '#c6ff3d';
-  ctx.fillText(label, padding, h - padding);
+  const fontSize = Math.max(14, Math.round(w * 0.028));
+  const pad = Math.round(fontSize * 0.6);
+  ctx.font = `600 ${fontSize}px ui-monospace, "SFMono-Regular", Menlo, monospace`;
+  ctx.textBaseline = 'alphabetic';
+  const textW = ctx.measureText(caption).width;
+  const bandH = fontSize + pad * 2;
 
-  return canvas.toDataURL('image/jpeg', 0.85);
+  // Ink band (no rounding) + paper text — matches the print idiom.
+  ctx.fillStyle = '#17150f';
+  ctx.fillRect(0, h - bandH, textW + pad * 2, bandH);
+  // Oxblood rule along the top of the band.
+  ctx.fillStyle = '#c2381b';
+  ctx.fillRect(0, h - bandH, textW + pad * 2, Math.max(2, Math.round(fontSize * 0.12)));
+  ctx.fillStyle = '#f4f1e8';
+  ctx.fillText(caption, pad, h - pad);
+
+  return { dataUrl: canvas.toDataURL('image/jpeg', JPEG_QUALITY), mimeType: 'image/jpeg' };
 }
 
-export function PhotoUpload({ challenge, className = '' }: PhotoUploadProps) {
+export function PhotoUpload({ challenge }: Props) {
   const { publicKey } = useWallet();
   const queryClient = useQueryClient();
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [preview, setPreview] = useState<string | null>(null);
-  const [metricValue, setMetricValue] = useState('');
+  const [imageData, setImageData] = useState<string | null>(null);
+  const [mimeType, setMimeType] = useState<string>('image/jpeg');
+  const [capturedAt, setCapturedAt] = useState<string | null>(null);
+  const [metricValue, setMetricValue] = useState<string>('');
   const [isFinal, setIsFinal] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const isCreator =
-    !!publicKey && publicKey.toBase58() === challenge.creatorWallet;
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const mutation = useMutation({
-    mutationFn: (body: CreatePhotoBody) => api.createPhoto(body),
-    onSuccess: (photo: Photo) => {
-      queryClient.invalidateQueries({ queryKey: ['challenge', challenge.id] });
-      queryClient.invalidateQueries({ queryKey: ['photos', challenge.id] });
-      // Reset form.
-      setPreview(null);
-      setMetricValue('');
-      setIsFinal(false);
-      setError(null);
-      if (fileRef.current) fileRef.current.value = '';
-      void photo;
-    },
-    onError: (e: unknown) =>
-      setError(e instanceof Error ? e.message : 'Failed to post photo'),
-  });
+  // Only the creator posts progress proof.
+  if (!publicKey || publicKey.toBase58() !== challenge.creatorWallet) return null;
 
-  const onFile = useCallback(async (file: File | undefined) => {
-    if (!file) return;
-    setError(null);
+  async function onSelect(file: File) {
+    setStatus('idle');
+    setErrorMsg(null);
     try {
-      const raw = await readAsDataUrl(file);
-      const canvas = canvasRef.current;
-      if (!canvas) throw new Error('Canvas not ready');
-      const composited = await compositeWithTimestamp(canvas, raw, new Date());
-      setPreview(composited);
+      const now = new Date();
+      const img = await loadImage(file);
+      const { dataUrl, mimeType: mt } = processImage(img, now);
+      setPreview(dataUrl);
+      setImageData(dataUrl);
+      setMimeType(mt);
+      setCapturedAt(now.toISOString());
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not process image');
+      setStatus('error');
+      setErrorMsg(e instanceof Error ? e.message : 'Could not process that image.');
     }
-  }, []);
+  }
 
-  const submit = useCallback(() => {
-    if (!preview) {
-      setError('Choose a photo first');
-      return;
+  function reset() {
+    setPreview(null);
+    setImageData(null);
+    setCapturedAt(null);
+    setMetricValue('');
+    setIsFinal(false);
+    if (fileRef.current) fileRef.current.value = '';
+  }
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!imageData || !capturedAt) return;
+    setBusy(true);
+    setStatus('idle');
+    setErrorMsg(null);
+    try {
+      const trimmed = metricValue.trim();
+      const parsedMetric = trimmed === '' ? undefined : Number(trimmed);
+      await api.createPhoto({
+        challengeId: challenge.id,
+        capturedAt,
+        imageData,
+        mimeType,
+        metricValue: parsedMetric !== undefined && Number.isFinite(parsedMetric) ? parsedMetric : undefined,
+        isFinal,
+      });
+      await queryClient.invalidateQueries({ queryKey: ['challenge', challenge.id] });
+      setStatus('success');
+      reset();
+    } catch (err) {
+      setStatus('error');
+      setErrorMsg(err instanceof Error ? err.message : 'Upload failed.');
+    } finally {
+      setBusy(false);
     }
-    const parsedMetric = metricValue.trim() === '' ? undefined : Number(metricValue);
-    if (parsedMetric !== undefined && !Number.isFinite(parsedMetric)) {
-      setError('Metric value must be a number');
-      return;
-    }
-    mutation.mutate({
-      challengeId: challenge.id,
-      capturedAt: new Date().toISOString(),
-      imageData: preview,
-      mimeType: 'image/jpeg',
-      metricValue: parsedMetric,
-      isFinal,
-    });
-  }, [preview, metricValue, isFinal, challenge.id, mutation]);
-
-  // Hidden canvas always rendered so the ref exists for compositing.
-  const hiddenCanvas = <canvas ref={canvasRef} className="hidden" />;
-
-  if (!isCreator) {
-    // Non-creators never see the control (canvas not needed either).
-    return null;
   }
 
   return (
-    <Card className={`flex flex-col gap-4 p-4 ${className}`}>
-      {hiddenCanvas}
-      <div className="flex items-center gap-2">
-        <Camera className="h-4 w-4 text-brand" />
-        <h3 className="text-sm font-semibold">Post a progress photo</h3>
+    <Panel className="p-4">
+      <div className="flex items-center justify-between">
+        <h3 className="display text-xl text-ink">Post Proof</h3>
+        <Tag tone="muted">Creator only</Tag>
       </div>
+      <p className="text-sm text-ink-2 mt-1.5">
+        Drop a progress shot. A timestamp is burned into the corner so the board can&rsquo;t be gamed.
+      </p>
 
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        onChange={(e) => void onFile(e.target.files?.[0])}
-        className="block w-full text-sm text-muted file:mr-3 file:rounded-lg file:border-0 file:bg-surface-2 file:px-3 file:py-2 file:text-sm file:font-medium file:text-foreground hover:file:bg-border"
-      />
-
-      {preview && (
-        <div className="overflow-hidden rounded-xl border border-border">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={preview} alt="Photo preview with timestamp" className="w-full object-cover" />
+      <form onSubmit={onSubmit} className="rule mt-4 pt-4 flex flex-col gap-4">
+        {/* File picker */}
+        <div>
+          <span className="label">Image</span>
+          <div className="mt-1.5 flex items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => fileRef.current?.click()}
+              disabled={busy}
+            >
+              {preview ? 'Replace' : 'Choose file'}
+            </Button>
+            {preview ? (
+              <button
+                type="button"
+                onClick={reset}
+                disabled={busy}
+                className="label tracking-normal underline hover:text-accent disabled:opacity-40"
+              >
+                Clear
+              </button>
+            ) : (
+              <span className="text-xs text-faint">JPEG / PNG, capped to 1280px</span>
+            )}
+          </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void onSelect(f);
+            }}
+          />
         </div>
-      )}
 
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-xs text-muted">
-          Metric value (optional)
-          <input
-            type="number"
-            inputMode="decimal"
-            value={metricValue}
-            onChange={(e) => setMetricValue(e.target.value)}
-            placeholder="e.g. 185"
-            className="h-9 w-32 rounded-lg border border-border bg-surface-2 px-2 text-sm text-foreground outline-none focus:border-brand"
-          />
-        </label>
-
-        <label className="flex h-9 items-center gap-2 text-sm text-foreground">
-          <input
-            type="checkbox"
-            checked={isFinal}
-            onChange={(e) => setIsFinal(e.target.checked)}
-            className="h-4 w-4 accent-[var(--accent)]"
-          />
-          Mark as final photo
-        </label>
-      </div>
-
-      {isFinal && (
-        <p className="text-xs text-warn">
-          The final photo is what the AI oracle judges at the deadline. Make it count.
-        </p>
-      )}
-      {error && <p className="text-xs text-no">{error}</p>}
-
-      <Button
-        variant="accent"
-        onClick={submit}
-        disabled={!preview || mutation.isPending}
-      >
-        {mutation.isPending ? (
-          <>
-            <Loader2 className="h-4 w-4 animate-spin" /> Posting…
-          </>
-        ) : (
-          <>
-            <Upload className="h-4 w-4" /> Post photo
-          </>
+        {/* Preview (data URL with burned-in timestamp) */}
+        {preview && (
+          <div className="border border-line bg-paper-2 p-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={preview} alt="Proof preview" className="block w-full max-h-80 object-contain" />
+          </div>
         )}
-      </Button>
-    </Card>
+
+        {/* Metric + final flag */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <label className="block">
+            <span className="label">Metric value</span>
+            <input
+              type="number"
+              inputMode="decimal"
+              step="any"
+              value={metricValue}
+              onChange={(e) => setMetricValue(e.target.value)}
+              placeholder="optional"
+              disabled={busy}
+              className="num mt-1.5 w-full h-10 px-3 bg-card border border-line text-ink placeholder:text-faint focus:border-ink focus:outline-none"
+            />
+          </label>
+
+          <label className="flex items-start gap-2.5 sm:items-center sm:pt-6 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={isFinal}
+              onChange={(e) => setIsFinal(e.target.checked)}
+              disabled={busy}
+              className="mt-0.5 sm:mt-0 h-4 w-4 accent-[#c2381b]"
+            />
+            <span className="text-sm text-ink-2 leading-snug">
+              <span className="display-tight text-ink text-base">Mark as final proof</span>
+              <span className="block text-xs text-muted">This is what the AI judges.</span>
+            </span>
+          </label>
+        </div>
+
+        {isFinal && (
+          <div className="border border-accent bg-card px-3 py-2">
+            <span className="label text-accent">Final proof</span>
+            <p className="text-xs text-ink-2 mt-0.5">Submitting this locks in the photo the oracle evaluates at the deadline.</p>
+          </div>
+        )}
+
+        {/* Status */}
+        {status === 'success' && (
+          <div className="border border-yes bg-yes-soft px-3 py-2">
+            <span className="label text-yes">Posted</span>
+            <p className="text-xs text-ink-2 mt-0.5">Your proof is on the board.</p>
+          </div>
+        )}
+        {status === 'error' && (
+          <div className="border border-no bg-no-soft px-3 py-2">
+            <span className="label text-no">Failed</span>
+            <p className="text-xs text-ink-2 mt-0.5">{errorMsg ?? 'Something went wrong.'}</p>
+          </div>
+        )}
+
+        <div className="flex items-center gap-3">
+          <Button type="submit" variant="accent" size="md" disabled={busy || !imageData}>
+            {busy ? 'Posting…' : isFinal ? 'Submit final proof' : 'Post proof'}
+          </Button>
+        </div>
+      </form>
+    </Panel>
   );
 }

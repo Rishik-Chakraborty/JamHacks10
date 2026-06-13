@@ -1,107 +1,98 @@
-/**
- * ProgressChart — recharts line chart of a challenge's metric points
- * (value over time). Handles the empty case gracefully.
- */
 'use client';
 
 import { useMemo } from 'react';
 import {
-  ResponsiveContainer,
   LineChart,
   Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
+  ResponsiveContainer,
 } from 'recharts';
-import type { MetricPoint, MetricType } from '@/types/contract';
+import type { MetricPoint } from '@/types/contract';
 
-export interface ProgressChartProps {
+interface Props {
   metrics: MetricPoint[];
-  metricType: MetricType;
-  className?: string;
+  metricType?: string;
 }
 
-const UNIT: Record<MetricType, string> = {
-  weight: 'lbs',
-  bench: 'lbs',
-  visual: '',
-};
+const INK = '#17150f';
+const LINE = '#d8d1bf';
+const MUTED = '#6b6557';
 
-function fmtTs(ts: string): string {
-  const d = new Date(ts);
-  return Number.isNaN(d.getTime())
-    ? ts
-    : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+/** Short axis date, e.g. "Jun 12". */
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-export function ProgressChart({ metrics, metricType, className = '' }: ProgressChartProps) {
+/**
+ * Flat editorial progress line. No area gradient, no shadow — a thin ink trend
+ * line over a dashed hairline grid, monospace ticks.
+ */
+export function ProgressChart({ metrics, metricType }: Props) {
   const data = useMemo(
     () =>
       [...metrics]
-        .filter((m) => Number.isFinite(m.value))
         .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime())
-        .map((m) => ({ ts: m.ts, label: fmtTs(m.ts), value: m.value })),
+        .map((m) => ({ ts: m.ts, label: shortDate(m.ts), value: m.value })),
     [metrics],
   );
 
-  if (data.length === 0) {
-    return (
-      <div
-        className={`flex min-h-48 items-center justify-center rounded-xl border border-dashed border-border text-sm text-muted ${className}`}
-      >
-        No metric data yet — progress will appear here as photos are posted.
-      </div>
-    );
-  }
-
-  const unit = UNIT[metricType];
-
   return (
-    <div className={`h-56 w-full ${className}`}>
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: -16 }}>
-          <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
-          <XAxis
-            dataKey="label"
-            stroke="var(--muted)"
-            tick={{ fontSize: 11, fill: 'var(--muted)' }}
-            tickLine={false}
-            axisLine={{ stroke: 'var(--border)' }}
-          />
-          <YAxis
-            stroke="var(--muted)"
-            tick={{ fontSize: 11, fill: 'var(--muted)' }}
-            tickLine={false}
-            axisLine={false}
-            width={48}
-            unit={unit ? ` ${unit}` : undefined}
-          />
-          <Tooltip
-            contentStyle={{
-              background: 'var(--surface-2)',
-              border: '1px solid var(--border)',
-              borderRadius: 12,
-              color: 'var(--foreground)',
-              fontSize: 12,
-            }}
-            labelStyle={{ color: 'var(--muted)' }}
-            formatter={(value) => [
-              unit ? `${value} ${unit}` : `${value}`,
-              metricType,
-            ]}
-          />
-          <Line
-            type="monotone"
-            dataKey="value"
-            stroke="var(--brand)"
-            strokeWidth={2.5}
-            dot={{ r: 3, fill: 'var(--brand)', strokeWidth: 0 }}
-            activeDot={{ r: 5, fill: 'var(--accent)', strokeWidth: 0 }}
-            isAnimationActive
-          />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
+    <section>
+      <div className="flex items-baseline justify-between">
+        <h3 className="label text-ink">Progress</h3>
+        {metricType ? <span className="label">{metricType}</span> : null}
+      </div>
+      <div className="rule-ink mt-1.5" />
+
+      {data.length === 0 ? (
+        <div className="border border-line bg-card p-8 text-center mt-3">
+          <p className="text-sm text-muted">No measurements logged yet.</p>
+        </div>
+      ) : (
+        <div className="mt-3 h-56 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
+              <CartesianGrid stroke={LINE} strokeDasharray="2 4" vertical={false} />
+              <XAxis
+                dataKey="label"
+                stroke={LINE}
+                tickLine={false}
+                tick={{ fill: MUTED, fontSize: 10, fontFamily: 'var(--font-mono)' }}
+              />
+              <YAxis
+                stroke={LINE}
+                tickLine={false}
+                width={48}
+                tick={{ fill: MUTED, fontSize: 10, fontFamily: 'var(--font-mono)' }}
+              />
+              <Tooltip
+                cursor={{ stroke: MUTED, strokeWidth: 1, strokeDasharray: '2 4' }}
+                contentStyle={{
+                  background: '#fcfaf4',
+                  border: `1px solid ${INK}`,
+                  borderRadius: 0,
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 12,
+                  color: INK,
+                }}
+                labelStyle={{ color: MUTED, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em' }}
+              />
+              <Line
+                type="monotone"
+                dataKey="value"
+                stroke={INK}
+                strokeWidth={1.5}
+                dot={{ fill: INK, stroke: INK, r: 1.5 }}
+                activeDot={{ fill: INK, stroke: INK, r: 2.5 }}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </section>
   );
 }

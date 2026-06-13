@@ -1,101 +1,68 @@
-/**
- * PhotoGallery — newest-first grid of challenge progress photos. Resolves each
- * photo's source from either the inline base64 `imageData` data URL or, for
- * GridFS-backed photos, the `/photos/:id/image` endpoint. Marks the final photo.
- */
-'use client';
-
-import { useMemo } from 'react';
-import { Crown } from 'lucide-react';
-import { Badge } from '@/components/ui/Badge';
 import type { Photo } from '@/types/contract';
+import { Tag } from '@/components/ui/Tag';
+import { formatDate } from '@/lib/format';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5000/api';
-
-function photoSrc(p: Photo): string | null {
-  if (p.imageData) return p.imageData;
-  if (p.gridFsId) return `${API_BASE}/photos/${p.id}/image`;
-  return null;
-}
-
-function fmt(ts: string): string {
-  const d = new Date(ts);
-  return Number.isNaN(d.getTime())
-    ? ts
-    : d.toLocaleString(undefined, {
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-      });
-}
-
-export interface PhotoGalleryProps {
+interface Props {
   photos: Photo[];
-  className?: string;
 }
 
-export function PhotoGallery({ photos, className = '' }: PhotoGalleryProps) {
-  const ordered = useMemo(
-    () =>
-      [...photos].sort(
-        (a, b) => new Date(b.capturedAt).getTime() - new Date(a.capturedAt).getTime(),
-      ),
-    [photos],
-  );
+const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5000/api';
 
-  if (ordered.length === 0) {
+/** Resolve a photo's image source: inline data URL, else the GridFS endpoint. */
+function photoSrc(photo: Photo): string {
+  if (photo.imageData) return photo.imageData;
+  return `${API}/photos/${photo.id}/image`;
+}
+
+/** Newest-first grid of progress shots. Hard-edged thumbnails, hairline rules. */
+export function PhotoGallery({ photos }: Props) {
+  if (!photos || photos.length === 0) {
     return (
-      <div
-        className={`flex min-h-32 items-center justify-center rounded-xl border border-dashed border-border text-sm text-muted ${className}`}
-      >
-        No photos posted yet.
+      <div className="border border-line bg-card p-8 text-center">
+        <p className="display text-xl text-ink">No proof yet</p>
+        <p className="text-sm text-muted mt-1.5">Progress shots will show up here as they&rsquo;re posted.</p>
       </div>
     );
   }
 
+  const ordered = [...photos].sort(
+    (a, b) => new Date(b.capturedAt).getTime() - new Date(a.capturedAt).getTime(),
+  );
+
   return (
-    <div className={`grid grid-cols-2 gap-3 sm:grid-cols-3 ${className}`}>
-      {ordered.map((p) => {
-        const src = photoSrc(p);
-        return (
-          <figure
-            key={p.id}
-            className="group relative overflow-hidden rounded-xl border border-border bg-surface-2"
-          >
-            {src ? (
-              // eslint-disable-next-line @next/next/no-img-element
+    <div>
+      <div className="flex items-baseline justify-between rule-ink pt-2">
+        <h3 className="display text-xl text-ink">Progress</h3>
+        <span className="num text-sm text-muted">{ordered.length} shot{ordered.length === 1 ? '' : 's'}</span>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-4">
+        {ordered.map((photo) => (
+          <figure key={photo.id} className="bg-card border border-line">
+            <div className="relative bg-paper-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={src}
-                alt={`Progress photo from ${fmt(p.capturedAt)}`}
-                className="aspect-square w-full object-cover"
+                src={photoSrc(photo)}
+                alt={`Progress shot from ${formatDate(photo.capturedAt)}`}
+                className="block w-full aspect-square object-cover"
               />
-            ) : (
-              <div className="flex aspect-square w-full items-center justify-center text-xs text-muted">
-                image unavailable
-              </div>
-            )}
-
-            {p.isFinal && (
-              <div className="absolute left-2 top-2">
-                <Badge tone="accent" className="gap-1">
-                  <Crown className="h-3.5 w-3.5" />
-                  Final
-                </Badge>
-              </div>
-            )}
-
-            <figcaption className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5 text-[11px] text-foreground">
-              <span>{fmt(p.capturedAt)}</span>
-              {typeof p.metricValue === 'number' && (
-                <span className="font-semibold tabular-nums text-accent">
-                  {p.metricValue}
-                </span>
+              {photo.isFinal && (
+                <div className="absolute top-0 left-0 m-1.5">
+                  <Tag tone="accent" solid>
+                    Final proof
+                  </Tag>
+                </div>
+              )}
+            </div>
+            <figcaption className="rule px-2 py-2 flex items-baseline justify-between gap-2">
+              <span className="label tracking-normal text-ink-2">{formatDate(photo.capturedAt)}</span>
+              {photo.metricValue !== undefined && (
+                <span className="num text-sm text-ink">{photo.metricValue}</span>
               )}
             </figcaption>
           </figure>
-        );
-      })}
+        ))}
+      </div>
     </div>
   );
 }

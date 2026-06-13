@@ -1,0 +1,234 @@
+{
+    "address": "Gym1111111111111111111111111111111111111111",
+    "metadata": {
+        "name": "gymcast",
+        "version": "0.1.0",
+        "spec": "0.1.0",
+        "description": "GymCast parimutuel YES/NO prediction market"
+    },
+    "instructions": [
+        {
+            "name": "initialize_market",
+            "discriminator": [35, 35, 189, 193, 155, 48, 170, 203],
+            "accounts": [
+                {
+                    "name": "creator",
+                    "writable": true,
+                    "signer": true
+                },
+                {
+                    "name": "market",
+                    "writable": true,
+                    "pda": {
+                        "seeds": [
+                            { "kind": "const", "value": [109, 97, 114, 107, 101, 116] },
+                            { "kind": "account", "path": "creator" },
+                            { "kind": "arg", "path": "slug" }
+                        ]
+                    }
+                },
+                {
+                    "name": "vault",
+                    "pda": {
+                        "seeds": [
+                            { "kind": "const", "value": [118, 97, 117, 108, 116] },
+                            { "kind": "account", "path": "market" }
+                        ]
+                    }
+                },
+                {
+                    "name": "system_program",
+                    "address": "11111111111111111111111111111111"
+                }
+            ],
+            "args": [
+                { "name": "deadline", "type": "i64" },
+                { "name": "authority", "type": "pubkey" },
+                { "name": "slug", "type": "string" }
+            ]
+        },
+        {
+            "name": "place_bet",
+            "discriminator": [222, 62, 67, 220, 63, 166, 126, 33],
+            "accounts": [
+                {
+                    "name": "bettor",
+                    "writable": true,
+                    "signer": true
+                },
+                {
+                    "name": "market",
+                    "writable": true,
+                    "pda": {
+                        "seeds": [
+                            { "kind": "const", "value": [109, 97, 114, 107, 101, 116] },
+                            { "kind": "account", "path": "market.creator", "account": "Market" },
+                            { "kind": "account", "path": "market.slug", "account": "Market" }
+                        ]
+                    }
+                },
+                {
+                    "name": "vault",
+                    "writable": true,
+                    "pda": {
+                        "seeds": [
+                            { "kind": "const", "value": [118, 97, 117, 108, 116] },
+                            { "kind": "account", "path": "market" }
+                        ]
+                    }
+                },
+                {
+                    "name": "position",
+                    "writable": true,
+                    "pda": {
+                        "seeds": [
+                            { "kind": "const", "value": [112, 111, 115, 105, 116, 105, 111, 110] },
+                            { "kind": "account", "path": "market" },
+                            { "kind": "account", "path": "bettor" }
+                        ]
+                    }
+                },
+                {
+                    "name": "system_program",
+                    "address": "11111111111111111111111111111111"
+                }
+            ],
+            "args": [
+                { "name": "side", "type": "u8" },
+                { "name": "amount", "type": "u64" }
+            ]
+        },
+        {
+            "name": "resolve_market",
+            "discriminator": [155, 23, 80, 173, 46, 74, 23, 239],
+            "accounts": [
+                {
+                    "name": "authority",
+                    "signer": true,
+                    "relations": ["market"]
+                },
+                {
+                    "name": "market",
+                    "writable": true,
+                    "pda": {
+                        "seeds": [
+                            { "kind": "const", "value": [109, 97, 114, 107, 101, 116] },
+                            { "kind": "account", "path": "market.creator", "account": "Market" },
+                            { "kind": "account", "path": "market.slug", "account": "Market" }
+                        ]
+                    }
+                }
+            ],
+            "args": [
+                { "name": "outcome", "type": "u8" }
+            ]
+        },
+        {
+            "name": "claim_winnings",
+            "discriminator": [161, 215, 24, 59, 14, 236, 242, 221],
+            "accounts": [
+                {
+                    "name": "bettor",
+                    "writable": true,
+                    "signer": true,
+                    "relations": ["position"]
+                },
+                {
+                    "name": "market",
+                    "pda": {
+                        "seeds": [
+                            { "kind": "const", "value": [109, 97, 114, 107, 101, 116] },
+                            { "kind": "account", "path": "market.creator", "account": "Market" },
+                            { "kind": "account", "path": "market.slug", "account": "Market" }
+                        ]
+                    }
+                },
+                {
+                    "name": "vault",
+                    "writable": true,
+                    "pda": {
+                        "seeds": [
+                            { "kind": "const", "value": [118, 97, 117, 108, 116] },
+                            { "kind": "account", "path": "market" }
+                        ]
+                    }
+                },
+                {
+                    "name": "position",
+                    "writable": true,
+                    "pda": {
+                        "seeds": [
+                            { "kind": "const", "value": [112, 111, 115, 105, 116, 105, 111, 110] },
+                            { "kind": "account", "path": "market" },
+                            { "kind": "account", "path": "bettor" }
+                        ]
+                    }
+                },
+                {
+                    "name": "system_program",
+                    "address": "11111111111111111111111111111111"
+                }
+            ],
+            "args": []
+        }
+    ],
+    "accounts": [
+        {
+            "name": "Market",
+            "discriminator": [219, 190, 213, 55, 0, 227, 198, 154]
+        },
+        {
+            "name": "Position",
+            "discriminator": [170, 188, 143, 228, 122, 64, 247, 208]
+        }
+    ],
+    "errors": [
+        { "code": 6000, "name": "SlugTooLong", "msg": "Slug exceeds the maximum length" },
+        { "code": 6001, "name": "DeadlineInPast", "msg": "Deadline must be in the future" },
+        { "code": 6002, "name": "ZeroAmount", "msg": "Bet amount must be greater than zero" },
+        { "code": 6003, "name": "InvalidSide", "msg": "Side must be 0 (YES) or 1 (NO)" },
+        { "code": 6004, "name": "InvalidOutcome", "msg": "Outcome must be 1 (YES) or 2 (NO)" },
+        { "code": 6005, "name": "MarketResolved", "msg": "Market is already resolved" },
+        { "code": 6006, "name": "MarketClosed", "msg": "Market is closed for betting (past deadline)" },
+        { "code": 6007, "name": "DeadlineNotReached", "msg": "Deadline has not been reached yet" },
+        { "code": 6008, "name": "MarketNotResolved", "msg": "Market is not resolved yet" },
+        { "code": 6009, "name": "AlreadyClaimed", "msg": "Winnings already claimed" },
+        { "code": 6010, "name": "Unauthorized", "msg": "Not authorized for this action" },
+        { "code": 6011, "name": "MathOverflow", "msg": "Checked arithmetic overflow" },
+        { "code": 6012, "name": "InsufficientVault", "msg": "Vault has insufficient lamports for payout" }
+    ],
+    "types": [
+        {
+            "name": "Market",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    { "name": "creator", "type": "pubkey" },
+                    { "name": "authority", "type": "pubkey" },
+                    { "name": "deadline", "type": "i64" },
+                    { "name": "yes_pool", "type": "u64" },
+                    { "name": "no_pool", "type": "u64" },
+                    { "name": "resolved", "type": "bool" },
+                    { "name": "outcome", "type": "u8" },
+                    { "name": "slug", "type": "string" },
+                    { "name": "bump", "type": "u8" },
+                    { "name": "vault_bump", "type": "u8" }
+                ]
+            }
+        },
+        {
+            "name": "Position",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    { "name": "bettor", "type": "pubkey" },
+                    { "name": "market", "type": "pubkey" },
+                    { "name": "yes_amount", "type": "u64" },
+                    { "name": "no_amount", "type": "u64" },
+                    { "name": "claimed", "type": "bool" },
+                    { "name": "bump", "type": "u8" }
+                ]
+            }
+        }
+    ]
+}
