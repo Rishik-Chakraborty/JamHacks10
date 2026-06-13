@@ -12,7 +12,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 
-declare_id!("Gym1111111111111111111111111111111111111111");
+declare_id!("Gg39XD25iRQTxauZuDfBVkoEVKjnaUZT1iscyhyqyXWs");
 
 /// On-chain outcome encoding (matches shared/types.ts).
 pub const OUTCOME_UNSET: u8 = 0;

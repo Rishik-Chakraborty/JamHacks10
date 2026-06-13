@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-gymcast = "Gym1111111111111111111111111111111111111111"
+gymcast = "Gg39XD25iRQTxauZuDfBVkoEVKjnaUZT1iscyhyqyXWs"
 
 [registry]
 url = "https://api.apr.dev"
