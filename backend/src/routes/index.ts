@@ -10,8 +10,10 @@ import { betsRouter, challengeBetsRouter, userPositionsRouter } from './bets';
 import { feedRouter, photoLikeRouter, profileRouter } from './feed';
 import { commentsRouter, challengeCommentsRouter } from './comments';
 import { linesRouter } from './lines';
+import { aiRouter } from './ai';
 
 export function mountRoutes(app: Express): void {
+  app.use('/api/ai', aiRouter);
   app.use('/api/feed', feedRouter);
   app.use('/api/lines', linesRouter);
   app.use('/api/users', userPositionsRouter);

@@ -1,0 +1,114 @@
+{
+  "runAt": "2026-06-13T23:13:37.089Z",
+  "summary": {
+    "totalTests": 19,
+    "passed": 19,
+    "failed": 0,
+    "testCaseAccuracy": 1,
+    "avgXGBoostLatencyMs": 0,
+    "modelTrainAccuracy": 1,
+    "modelTestAccuracy": 0.9583333333333334
+  },
+  "testCases": [
+    {
+      "name": "Clear success — bench press PR clearly visible",
+      "description": "High confidence, met=1, excellent photo quality, full completion",
+      "expectedLabel": 1,
+      "calibratedConfidence": 0.9995431208045331,
+      "finalConfidence": 0.9478400922815866,
+      "predicted": 1,
+      "correct": true,
+      "latencyMs": 0
+    },
+    {
+      "name": "Clear failure — no barbell visible",
+      "description": "High confidence, met=0, clear photo showing non-completion",
+      "expectedLabel": 0,
+      "calibratedConfidence": 0.011190263215245267,
+      "finalConfidence": 0.08191659212533585,
+      "predicted": 0,
+      "correct": true,
+      "latencyMs": 0
+    },
+    {
+      "name": "Strong success — 10k run screenshot on phone",
+      "description": "Gemini confident, met=1, legible app screenshot, 100% goal",
+      "expectedLabel": 1,
+      "calibratedConfidence": 0.9991291088406749,
+      "finalConfidence": 0.9021951880942362,
+      "predicted": 1,
+      "correct": true,
+      "latencyMs": 0
+    },
+    {
+      "name": "Definite failure — photo shows treadmill at 0",
+      "description": "Met=0, treadmill display clearly not started",
+      "expectedLabel": 0,
+      "calibratedConfidence": 0.011190263215245267,
+      "finalConfidence": 0.062416592125335825,
+      "predicted": 0,
+      "correct": true,
+      "latencyMs": 0
+    },
+    {
+      "name": "Ambiguous — low quality selfie at gym",
+      "description": "Moderate confidence met=true, low photo quality but completion visible",
+      "expectedLabel": 1,
+      "calibratedConfidence": 0.985836668693755,
+      "finalConfidence": 0.7350428340428142,
+      "predicted": 1,
+      "correct": true,
+      "latencyMs": 0
+    },
+    {
+      "name": "Ambiguous failure — blurry weight plate",
+      "description": "70% confident not met, blurry photo, low goal completion",
+      "expectedLabel": 0,
+      "calibratedConfidence": 0.0006861377330691323,
+      "finalConfidence": 0.19524014820657423,
+      "predicted": 0,
+      "correct": true,
+      "latencyMs": 0
+    },
+    {
+      "name": "High effort success — deadlift lockout clear",
+      "description": "Very clear, high effort, unambiguous completion",
+      "expectedLabel": 1,
+      "calibratedConfidence": 0.9995431208045331,
+      "finalConfidence": 0.9608400922815865,
+      "predicted": 1,
+      "correct": true,
+      "latencyMs": 0
+    },
+    {
+      "name": "Low effort failure — no real attempt",
+      "description": "Clear non-completion, low effort visible",
+      "expectedLabel": 0,
+      "calibratedConfidence": 0.011190263215245267,
+      "finalConfidence": 0.12091659212533588,
+      "predicted": 0,
+      "correct": true,
+      "latencyMs": 0
+    },
+    {
+      "name": "Near-miss — decent effort but photo evidence inconclusive",
+      "description": "73% confident not met, moderate quality photo, borderline completion visible",
+      "expectedLabel": 0,
+      "calibratedConfidence": 0.11519207292455018,
+      "finalConfidence": 0.2158172255235926,
+      "predicted": 0,
+      "correct": true,
+      "latencyMs": 0
+    },
+    {
+      "name": "Moderate success — squats with correct depth",
+      "description": "Decent quality, met=1, good completion",
+      "expectedLabel": 1,
+      "calibratedConfidence": 0.9991291088406749,
+      "finalConfidence": 0.8566951880942362,
+      "predicted": 1,
+      "correct": true,
+      "latencyMs": 0
+    }
+  ]
+}

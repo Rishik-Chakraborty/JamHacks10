@@ -17,10 +17,13 @@ import { mountRoutes } from './routes';
 import { errorHandler, notFound } from './middleware/error';
 import { initRealtime, setIo } from './realtime';
 import { startScheduler } from './services/scheduler';
+import { warmupXGBoost } from './services/ai';
 import { SOCKET_EVENTS } from './contract';
 
 async function main() {
   await connectDb();
+  // Pre-load (or auto-train) XGBoost calibration model to avoid cold-start on first eval
+  warmupXGBoost().catch(() => {/* non-fatal; logs its own warning */});
 
   const app = express();
   app.use(helmet());

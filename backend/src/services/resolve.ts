@@ -157,7 +157,12 @@ export async function finalizeChallenge(challengeId: string, outcome: BetSide): 
         challenge.noPoolLamports = market.noPoolLamports;
       }
     } catch (err) {
-      throw new HttpError(502, `On-chain resolve_market failed: ${err instanceof Error ? err.message : String(err)}`);
+      // On-chain resolution failed (e.g. account deserialisation mismatch after redeploy,
+      // or market was never initialised). Degrade gracefully: MongoDB resolution still
+      // proceeds so bettors can see the outcome; log for investigation.
+      console.warn(
+        `[resolve] On-chain resolve_market failed (non-fatal, MongoDB resolution continues): ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
