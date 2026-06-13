@@ -1,26 +1,118 @@
 @import "tailwindcss";
 
+/* ----------------------------------------------------------------------------
+ * GymCast theme — dark, high-energy, competitive.
+ * Brand: electric violet (YES / hype) + acid lime (action) with a danger red
+ * (NO / misses). Surfaces are deep near-black with subtle violet tint.
+ * ------------------------------------------------------------------------- */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #07060d;
+  --surface: #100e1c;
+  --surface-2: #16142a;
+  --border: #2a2740;
+  --foreground: #f4f3fb;
+  --muted: #a09bc4;
+
+  /* brand / semantic accents */
+  --brand: #8b5cff;        /* electric violet — primary */
+  --brand-strong: #7b3dff;
+  --accent: #c6ff3d;       /* acid lime — CTAs / energy */
+  --yes: #36e27a;          /* market YES */
+  --no: #ff5470;           /* market NO / misses */
+  --warn: #ffb648;
+
+  --ring: #8b5cff;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
   --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-accent: var(--accent);
+  --color-yes: var(--yes);
+  --color-no: var(--no);
+  --color-warn: var(--warn);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --radius-card: 1rem;
 }
 
 body {
-  background: var(--background);
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(139, 92, 255, 0.18), transparent 60%),
+    radial-gradient(900px 500px at -10% 10%, rgba(198, 255, 61, 0.08), transparent 55%),
+    var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  min-height: 100dvh;
+}
+
+/* ----------------------------------------------------------------------------
+ * Utility classes feature agents can rely on.
+ * ------------------------------------------------------------------------- */
+@layer utilities {
+  /* Standard card surface. */
+  .card {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+  }
+
+  /* Frosted glass panel (nav, overlays, hype meter). */
+  .glass {
+    background-color: color-mix(in oklab, var(--surface) 70%, transparent);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
+  }
+
+  /* Brand gradient text for hero / titles. */
+  .text-gradient {
+    background: linear-gradient(100deg, var(--brand) 0%, var(--accent) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Energetic glow accent (e.g. live badges, primary buttons). */
+  .glow-brand {
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--brand) 40%, transparent),
+      0 8px 30px -8px color-mix(in oklab, var(--brand) 60%, transparent);
+  }
+
+  /* Live pulse for "active"/streaming indicators. */
+  .pulse-dot {
+    animation: gymcast-pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes gymcast-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+}
+
+/* Solana wallet-adapter button — match the GymCast theme. */
+.wallet-adapter-button-trigger {
+  background-color: var(--brand) !important;
+  border-radius: 0.75rem !important;
+  font-family: var(--font-sans) !important;
+  font-weight: 600 !important;
+  height: 2.5rem !important;
+}
+.wallet-adapter-button-trigger:hover {
+  background-color: var(--brand-strong) !important;
 }
