@@ -92,10 +92,20 @@ export async function initializeMarket({
   slug,
   deadline,
   authority,
+  influencer,
+  platform,
+  creatorFeeBps,
+  platformFeeBps,
 }: MarketClientArgs & {
   slug: string;
   deadline: Date | string;
   authority: PublicKey | string;
+  /** The influencer/subject — earns the creator cut; cannot bet. */
+  influencer: PublicKey | string;
+  /** Platform fee recipient. */
+  platform: PublicKey | string;
+  creatorFeeBps: number;
+  platformFeeBps: number;
 }): Promise<{ txSig: string; marketPda: string; vaultPda: string; slug: string }> {
   const w = ensureReady({ connection, wallet });
 
@@ -108,13 +118,23 @@ export async function initializeMarket({
   const [market] = marketPda(creator, slug, programId);
   const [vault] = vaultPda(market, programId);
   const authorityPk = toPubkey(authority);
+  const influencerPk = toPubkey(influencer);
+  const platformPk = toPubkey(platform);
   const deadlineUnix = toUnix(deadline);
 
   const program = getProgram(idl as Idl, connection, w);
   const methods = program.methods as unknown as MethodsMap;
 
   const txSig = await methods
-    .initializeMarket(new BN(deadlineUnix), authorityPk, slug)
+    .initializeMarket(
+      new BN(deadlineUnix),
+      authorityPk,
+      influencerPk,
+      platformPk,
+      creatorFeeBps,
+      platformFeeBps,
+      slug,
+    )
     .accounts({
       creator,
       market,

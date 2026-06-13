@@ -1,13 +1,13 @@
-//! GymCast — parimutuel YES/NO prediction market on Solana (devnet).
+//! the gainsXchange — parimutuel YES/NO prediction market on Solana (devnet).
 //!
-//! Per-challenge escrow: spectators bet YES or NO; the off-chain oracle
-//! (the `authority` keypair) resolves the market after the deadline; winners
-//! claim a proportional share of the losing pool. One-sided markets and
-//! markets with no winners refund each bettor's own stake.
+//! New-model program: a CHALLENGER opens a market on an INFLUENCER (the subject),
+//! spectators bet YES/NO, the off-chain oracle (`authority`) resolves it after the
+//! deadline, and winners claim a proportional share of the losing pool — AFTER a
+//! creator cut (to the influencer) and a platform fee are skimmed off. The
+//! influencer may never bet, betting locks 12h before the deadline, and the
+//! authority can `refund_market` (no-show / decline) so everyone reclaims stake.
 //!
-//! All payouts use checked integer math and PDA signer seeds for vault
-//! withdrawals (`invoke_signed`). Outcome / side encodings mirror
-//! `shared/types.ts` (OUTCOME_*, SIDE_*).
+//! Checked integer math; PDA signer seeds for all vault withdrawals.
 
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
@@ -23,32 +23,51 @@ pub const OUTCOME_NO: u8 = 2;
 pub const SIDE_YES: u8 = 0;
 pub const SIDE_NO: u8 = 1;
 
-/// Max slug length used as a PDA seed (keeps seed under the 32-byte limit).
+/// Max slug length used as a PDA seed.
 pub const MAX_SLUG_LEN: usize = 32;
+
+/// Bets lock this many seconds before the deadline (12h).
+pub const BET_LOCK_SECONDS: i64 = 12 * 60 * 60;
+/// Basis-points denominator (10000 = 100%).
+pub const BPS_DENOM: u128 = 10_000;
 
 #[program]
 pub mod gymcast {
     use super::*;
 
-    /// Create a per-challenge market. The `creator` and `slug` define the
-    /// Market PDA; `authority` is the oracle pubkey that may resolve it.
+    /// Create a per-line market. `creator` (the challenger) + `slug` define the
+    /// Market PDA. `authority` resolves it; `influencer` is the subject (earns the
+    /// creator cut, can't bet); `platform` receives the platform fee.
     pub fn initialize_market(
         ctx: Context<InitializeMarket>,
         deadline: i64,
         authority: Pubkey,
+        influencer: Pubkey,
+        platform: Pubkey,
+        creator_fee_bps: u16,
+        platform_fee_bps: u16,
         slug: String,
     ) -> Result<()> {
         require!(slug.len() <= MAX_SLUG_LEN, GymError::SlugTooLong);
+        require!(
+            (creator_fee_bps as u128) + (platform_fee_bps as u128) <= BPS_DENOM,
+            GymError::FeeTooHigh
+        );
         let now = Clock::get()?.unix_timestamp;
         require!(deadline > now, GymError::DeadlineInPast);
 
         let market = &mut ctx.accounts.market;
         market.creator = ctx.accounts.creator.key();
         market.authority = authority;
+        market.influencer = influencer;
+        market.platform = platform;
+        market.creator_fee_bps = creator_fee_bps;
+        market.platform_fee_bps = platform_fee_bps;
         market.deadline = deadline;
         market.yes_pool = 0;
         market.no_pool = 0;
         market.resolved = false;
+        market.refunded = false;
         market.outcome = OUTCOME_UNSET;
         market.slug = slug;
         market.bump = ctx.bumps.market;
@@ -57,22 +76,30 @@ pub mod gymcast {
         Ok(())
     }
 
-    /// Place a YES/NO bet. Transfers `amount` lamports bettor -> vault and
-    /// bumps both the market pool and the bettor's position.
+    /// Place a YES/NO bet. The influencer can't bet; betting locks 12h before the
+    /// deadline. Transfers `amount` lamports bettor -> vault.
     pub fn place_bet(ctx: Context<PlaceBet>, side: u8, amount: u64) -> Result<()> {
         require!(amount > 0, GymError::ZeroAmount);
-        require!(
-            side == SIDE_YES || side == SIDE_NO,
-            GymError::InvalidSide
-        );
+        require!(side == SIDE_YES || side == SIDE_NO, GymError::InvalidSide);
 
         let market = &mut ctx.accounts.market;
-        require!(!market.resolved, GymError::MarketResolved);
+        require!(!market.resolved && !market.refunded, GymError::MarketResolved);
 
+        // The influencer cannot bet on their own line.
+        require!(
+            ctx.accounts.bettor.key() != market.influencer,
+            GymError::InfluencerCannotBet
+        );
+
+        // Lock betting 12h before the deadline.
         let now = Clock::get()?.unix_timestamp;
-        require!(now < market.deadline, GymError::MarketClosed);
+        let lock_at = market
+            .deadline
+            .checked_sub(BET_LOCK_SECONDS)
+            .ok_or(GymError::MathOverflow)?;
+        require!(now < lock_at, GymError::MarketLocked);
 
-        // Escrow: bettor -> vault via the system program.
+        // Escrow: bettor -> vault.
         system_program::transfer(
             CpiContext::new(
                 ctx.accounts.system_program.to_account_info(),
@@ -85,7 +112,6 @@ pub mod gymcast {
         )?;
 
         let position = &mut ctx.accounts.position;
-        // Initialize position on first bet.
         if position.bettor == Pubkey::default() {
             position.bettor = ctx.accounts.bettor.key();
             position.market = market.key();
@@ -112,84 +138,145 @@ pub mod gymcast {
         Ok(())
     }
 
-    /// Resolve the market to an outcome. Only the oracle `authority` may call,
-    /// and only after the deadline has passed.
+    /// Resolve the market. Only the oracle `authority`, only after the deadline.
+    /// Skims the creator cut (-> influencer) + platform fee from the losing pool.
     pub fn resolve_market(ctx: Context<ResolveMarket>, outcome: u8) -> Result<()> {
         require!(
             outcome == OUTCOME_YES || outcome == OUTCOME_NO,
             GymError::InvalidOutcome
         );
 
+        // --- Validate + check the fee recipients match the stored ones. ---
+        {
+            let market = &ctx.accounts.market;
+            require!(!market.resolved && !market.refunded, GymError::MarketResolved);
+            let now = Clock::get()?.unix_timestamp;
+            require!(now >= market.deadline, GymError::DeadlineNotReached);
+            require!(ctx.accounts.influencer.key() == market.influencer, GymError::Unauthorized);
+            require!(ctx.accounts.platform.key() == market.platform, GymError::Unauthorized);
+        }
+
+        // --- Snapshot the values needed for fee math (drops the borrow). ---
+        let (creator_fee, platform_fee, vault_bump, market_key) = {
+            let market = &ctx.accounts.market;
+            let (winning_pool, losing_pool) = if outcome == OUTCOME_YES {
+                (market.yes_pool, market.no_pool)
+            } else {
+                (market.no_pool, market.yes_pool)
+            };
+            let (cf, pf) = if winning_pool > 0 && losing_pool > 0 {
+                (
+                    ((losing_pool as u128) * (market.creator_fee_bps as u128) / BPS_DENOM) as u64,
+                    ((losing_pool as u128) * (market.platform_fee_bps as u128) / BPS_DENOM) as u64,
+                )
+            } else {
+                (0u64, 0u64)
+            };
+            (cf, pf, market.vault_bump, market.key())
+        };
+
+        // --- Mark resolved. ---
+        {
+            let market = &mut ctx.accounts.market;
+            market.resolved = true;
+            market.outcome = outcome;
+        }
+
+        // --- Pay the fees out of the vault (PDA signer). ---
+        if creator_fee > 0 || platform_fee > 0 {
+            let vault_seeds: &[&[u8]] = &[b"vault", market_key.as_ref(), &[vault_bump]];
+            let signer_seeds: &[&[&[u8]]] = &[vault_seeds];
+
+            if creator_fee > 0 {
+                require!(ctx.accounts.vault.lamports() >= creator_fee, GymError::InsufficientVault);
+                system_program::transfer(
+                    CpiContext::new_with_signer(
+                        ctx.accounts.system_program.to_account_info(),
+                        system_program::Transfer {
+                            from: ctx.accounts.vault.to_account_info(),
+                            to: ctx.accounts.influencer.to_account_info(),
+                        },
+                        signer_seeds,
+                    ),
+                    creator_fee,
+                )?;
+            }
+            if platform_fee > 0 {
+                require!(ctx.accounts.vault.lamports() >= platform_fee, GymError::InsufficientVault);
+                system_program::transfer(
+                    CpiContext::new_with_signer(
+                        ctx.accounts.system_program.to_account_info(),
+                        system_program::Transfer {
+                            from: ctx.accounts.vault.to_account_info(),
+                            to: ctx.accounts.platform.to_account_info(),
+                        },
+                        signer_seeds,
+                    ),
+                    platform_fee,
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Refund a market (influencer no-show / declined). Authority-only; afterwards
+    /// every bettor reclaims their own stake via `claim_winnings`.
+    pub fn refund_market(ctx: Context<RefundMarket>) -> Result<()> {
         let market = &mut ctx.accounts.market;
         require!(!market.resolved, GymError::MarketResolved);
-
-        let now = Clock::get()?.unix_timestamp;
-        require!(now >= market.deadline, GymError::DeadlineNotReached);
-
-        market.resolved = true;
-        market.outcome = outcome;
-
+        market.refunded = true;
         Ok(())
     }
 
     /// Claim winnings (or a refund) for the caller's position.
     ///
-    /// Payout = stake_win + stake_win * losing_pool / winning_pool.
-    /// One-sided market (empty losing or winning pool) or a position with no
-    /// winning stake on the resolved side refunds the bettor's own stake.
+    /// Refunded / one-sided markets return own stake. Otherwise winners get
+    /// stake_win + a proportional share of the losing pool AFTER fees.
     pub fn claim_winnings(ctx: Context<ClaimWinnings>) -> Result<()> {
         let market = &ctx.accounts.market;
-        require!(market.resolved, GymError::MarketNotResolved);
+        require!(market.resolved || market.refunded, GymError::MarketNotResolved);
 
         let position = &mut ctx.accounts.position;
         require!(!position.claimed, GymError::AlreadyClaimed);
 
-        // Determine winning / losing pools and this bettor's winning stake.
         let (winning_pool, losing_pool, stake_win, stake_lose) = if market.outcome == OUTCOME_YES {
             (market.yes_pool, market.no_pool, position.yes_amount, position.no_amount)
         } else {
             (market.no_pool, market.yes_pool, position.no_amount, position.yes_amount)
         };
 
-        // Compute the lamports owed to this bettor.
-        // - One-sided market (no losing stake, or empty winning pool): refund
-        //   the bettor's own total stake on both sides.
-        // - Otherwise: winners get stake_win + proportional share of losing pool;
-        //   losers get nothing.
-        let payout: u64 = if losing_pool == 0 || winning_pool == 0 {
-            // No counterparty (one-sided or empty): refund own stake.
-            stake_win
-                .checked_add(stake_lose)
-                .ok_or(GymError::MathOverflow)?
+        let payout: u64 = if market.refunded || losing_pool == 0 || winning_pool == 0 {
+            // Refund / one-sided: return own total stake.
+            stake_win.checked_add(stake_lose).ok_or(GymError::MathOverflow)?
         } else if stake_win == 0 {
-            // Bettor was entirely on the losing side: nothing to claim.
             0
         } else {
-            // Proportional share of the losing pool: stake_win * losing_pool / winning_pool.
+            // Winners split the losing pool AFTER the creator + platform fees.
+            let fee_bps = (market.creator_fee_bps as u128) + (market.platform_fee_bps as u128);
+            let effective_losing = (losing_pool as u128)
+                .checked_mul(BPS_DENOM - fee_bps)
+                .ok_or(GymError::MathOverflow)?
+                / BPS_DENOM;
             let share = (stake_win as u128)
-                .checked_mul(losing_pool as u128)
+                .checked_mul(effective_losing)
                 .ok_or(GymError::MathOverflow)?
                 .checked_div(winning_pool as u128)
                 .ok_or(GymError::MathOverflow)?;
             let share_u64 = u64::try_from(share).map_err(|_| GymError::MathOverflow)?;
-            stake_win
-                .checked_add(share_u64)
-                .ok_or(GymError::MathOverflow)?
+            stake_win.checked_add(share_u64).ok_or(GymError::MathOverflow)?
         };
 
         position.claimed = true;
-
         if payout == 0 {
             return Ok(());
         }
 
-        // Transfer payout vault -> bettor using the vault PDA signer seeds.
         let market_key = market.key();
         let vault_bump = market.vault_bump;
         let vault_seeds: &[&[u8]] = &[b"vault", market_key.as_ref(), &[vault_bump]];
         let signer_seeds: &[&[&[u8]]] = &[vault_seeds];
 
-        // Guard against draining more than the vault holds.
         let vault_balance = ctx.accounts.vault.lamports();
         require!(vault_balance >= payout, GymError::InsufficientVault);
 
@@ -214,7 +301,7 @@ pub mod gymcast {
 /* -------------------------------------------------------------------------- */
 
 #[derive(Accounts)]
-#[instruction(deadline: i64, authority: Pubkey, slug: String)]
+#[instruction(deadline: i64, authority: Pubkey, influencer: Pubkey, platform: Pubkey, creator_fee_bps: u16, platform_fee_bps: u16, slug: String)]
 pub struct InitializeMarket<'info> {
     #[account(mut)]
     pub creator: Signer<'info>,
@@ -228,12 +315,7 @@ pub struct InitializeMarket<'info> {
     )]
     pub market: Account<'info, Market>,
 
-    /// Escrow vault — a plain SystemAccount owned by the system program so it
-    /// can hold and (via PDA signer seeds) release lamports.
-    #[account(
-        seeds = [b"vault", market.key().as_ref()],
-        bump
-    )]
+    #[account(seeds = [b"vault", market.key().as_ref()], bump)]
     pub vault: SystemAccount<'info>,
 
     pub system_program: Program<'info, System>,
@@ -252,11 +334,7 @@ pub struct PlaceBet<'info> {
     )]
     pub market: Account<'info, Market>,
 
-    #[account(
-        mut,
-        seeds = [b"vault", market.key().as_ref()],
-        bump = market.vault_bump
-    )]
+    #[account(mut, seeds = [b"vault", market.key().as_ref()], bump = market.vault_bump)]
     pub vault: SystemAccount<'info>,
 
     #[account(
@@ -283,6 +361,32 @@ pub struct ResolveMarket<'info> {
         bump = market.bump
     )]
     pub market: Account<'info, Market>,
+
+    #[account(mut, seeds = [b"vault", market.key().as_ref()], bump = market.vault_bump)]
+    pub vault: SystemAccount<'info>,
+
+    /// The influencer — receives the creator cut. Verified against market.influencer.
+    #[account(mut)]
+    pub influencer: SystemAccount<'info>,
+
+    /// The platform fee recipient. Verified against market.platform.
+    #[account(mut)]
+    pub platform: SystemAccount<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct RefundMarket<'info> {
+    pub authority: Signer<'info>,
+
+    #[account(
+        mut,
+        has_one = authority @ GymError::Unauthorized,
+        seeds = [b"market", market.creator.as_ref(), market.slug.as_bytes()],
+        bump = market.bump
+    )]
+    pub market: Account<'info, Market>,
 }
 
 #[derive(Accounts)]
@@ -296,11 +400,7 @@ pub struct ClaimWinnings<'info> {
     )]
     pub market: Account<'info, Market>,
 
-    #[account(
-        mut,
-        seeds = [b"vault", market.key().as_ref()],
-        bump = market.vault_bump
-    )]
+    #[account(mut, seeds = [b"vault", market.key().as_ref()], bump = market.vault_bump)]
     pub vault: SystemAccount<'info>,
 
     #[account(
@@ -320,12 +420,17 @@ pub struct ClaimWinnings<'info> {
 
 #[account]
 pub struct Market {
-    pub creator: Pubkey,
-    pub authority: Pubkey,
+    pub creator: Pubkey,        // the challenger who opened it
+    pub authority: Pubkey,      // oracle that resolves
+    pub influencer: Pubkey,     // subject; earns the creator cut; cannot bet
+    pub platform: Pubkey,       // platform fee recipient
+    pub creator_fee_bps: u16,   // e.g. 500 = 5%
+    pub platform_fee_bps: u16,  // e.g. 250 = 2.5%
     pub deadline: i64,
     pub yes_pool: u64,
     pub no_pool: u64,
     pub resolved: bool,
+    pub refunded: bool,
     pub outcome: u8,
     pub slug: String,
     pub bump: u8,
@@ -333,10 +438,11 @@ pub struct Market {
 }
 
 impl Market {
-    // 8 discriminator + 32 creator + 32 authority + 8 deadline + 8 yes_pool
-    // + 8 no_pool + 1 resolved + 1 outcome + (4 len + MAX_SLUG_LEN) slug
-    // + 1 bump + 1 vault_bump.
-    pub const SPACE: usize = 8 + 32 + 32 + 8 + 8 + 8 + 1 + 1 + (4 + MAX_SLUG_LEN) + 1 + 1;
+    // 8 disc + 32 creator + 32 authority + 32 influencer + 32 platform + 2 + 2
+    // + 8 deadline + 8 yes + 8 no + 1 resolved + 1 refunded + 1 outcome
+    // + (4 + MAX_SLUG_LEN) slug + 1 bump + 1 vault_bump
+    pub const SPACE: usize =
+        8 + 32 + 32 + 32 + 32 + 2 + 2 + 8 + 8 + 8 + 1 + 1 + 1 + (4 + MAX_SLUG_LEN) + 1 + 1;
 }
 
 #[account]
@@ -350,7 +456,6 @@ pub struct Position {
 }
 
 impl Position {
-    // 8 discriminator + 32 bettor + 32 market + 8 yes + 8 no + 1 claimed + 1 bump.
     pub const SPACE: usize = 8 + 32 + 32 + 8 + 8 + 1 + 1;
 }
 
@@ -362,12 +467,18 @@ impl Position {
 pub enum GymError {
     #[msg("Slug exceeds the maximum length")]
     SlugTooLong,
+    #[msg("Total fees exceed 100%")]
+    FeeTooHigh,
     #[msg("Deadline must be in the future")]
     DeadlineInPast,
     #[msg("Bet amount must be greater than zero")]
     ZeroAmount,
     #[msg("Side must be 0 (YES) or 1 (NO)")]
     InvalidSide,
+    #[msg("The influencer cannot bet on their own line")]
+    InfluencerCannotBet,
+    #[msg("Betting is locked (within 12h of the deadline)")]
+    MarketLocked,
     #[msg("Outcome must be 1 (YES) or 2 (NO)")]
     InvalidOutcome,
     #[msg("Market is already resolved")]

@@ -23,7 +23,7 @@ import { ChallengeModel, challengeToDTO } from '../models/Challenge';
 import { PhotoModel } from '../models/Photo';
 import { UserModel } from '../models/User';
 import { evaluateGoal, type EvaluateImage } from './ai';
-import { resolveMarket, fetchMarket } from './solana';
+import { resolveMarket, fetchMarket, refundMarket } from './solana';
 import { emitTicker } from '../realtime';
 import { PROOF_GRACE_HOURS } from '../contract';
 import type { BetSide, Outcome, OracleVerdict, ResolveChallengeResponse } from '../contract';
@@ -205,6 +205,15 @@ export async function refundChallenge(challengeId: string, opts: { noShow?: bool
   const challenge = await ChallengeModel.findById(challengeId);
   if (!challenge) throw new HttpError(404, 'Line not found');
   if (challenge.status === 'resolved' || challenge.status === 'refunded') return;
+
+  // Refund the on-chain escrow if this line has a market (best-effort).
+  if (env.solanaEnabled && challenge.marketPda) {
+    try {
+      await refundMarket(challengeToDTO(challenge));
+    } catch (err) {
+      console.warn('[resolve] on-chain refund_market failed:', err);
+    }
+  }
 
   challenge.status = 'refunded';
   challenge.set('misses', (challenge.misses ?? 0) + (opts.noShow ? 1 : 0));

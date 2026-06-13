@@ -220,12 +220,44 @@ export async function resolveMarket(
     );
   }
 
-  const { program, authority } = getClient();
+  const { program, authority, programId } = getClient();
   const marketPda = new PublicKey(challenge.marketPda);
+  const vault = deriveVaultPda(marketPda, programId);
+  const influencer = new PublicKey(challenge.creatorWallet); // subject — receives the creator cut
+  const platform = authority.publicKey; // platform fee recipient (the oracle authority)
   const outcomeCode = outcome === 'yes' ? OUTCOME_YES : OUTCOME_NO;
 
   const txSig = await program.methods
     .resolveMarket(outcomeCode)
+    .accounts({
+      authority: authority.publicKey,
+      market: marketPda,
+      vault,
+      influencer,
+      platform,
+      systemProgram: SystemProgram.programId,
+    })
+    .signers([authority])
+    .rpc();
+
+  return txSig;
+}
+
+/**
+ * Refund a market (influencer no-show / declined) with the authority signature.
+ * Afterwards each bettor reclaims their stake via `claim_winnings`.
+ */
+export async function refundMarket(challenge: Challenge): Promise<string> {
+  assertEnabled();
+  if (!challenge.marketPda) {
+    throw new Error(`challenge ${challenge.id} has no marketPda — nothing to refund on-chain`);
+  }
+
+  const { program, authority } = getClient();
+  const marketPda = new PublicKey(challenge.marketPda);
+
+  const txSig = await program.methods
+    .refundMarket()
     .accounts({
       authority: authority.publicKey,
       market: marketPda,

@@ -10,6 +10,8 @@ import { shortWallet } from '@/lib/format';
 import {
   CHALLENGE_TEMPLATES,
   LAMPORTS_PER_SOL,
+  DEFAULT_CREATOR_FEE_BPS,
+  DEFAULT_PLATFORM_FEE_BPS,
   type ChallengeTemplate,
   type CreateChallengeBody,
   type BetSide,
@@ -216,6 +218,10 @@ export function CreateChallengeForm() {
             slug,
             deadline: body.deadline,
             authority,
+            influencer: body.influencerWallet,
+            platform: authority, // platform fee recipient (reuse the oracle authority)
+            creatorFeeBps: DEFAULT_CREATOR_FEE_BPS,
+            platformFeeBps: DEFAULT_PLATFORM_FEE_BPS,
           });
           await api.attachMarket(challenge.id, { marketPda, vaultPda, programId });
         } catch {

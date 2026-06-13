@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { CreateChallengeForm } from '@/components/CreateChallengeForm';
 
 export const metadata: Metadata = {
-  title: 'Challenge an Influencer — GymCast',
+  title: 'Challenge an Influencer — the gainsXchange',
   description: 'Challenge an influencer to a fitness goal and let the market call it.',
 };
 

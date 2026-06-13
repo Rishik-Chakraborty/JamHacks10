@@ -89,7 +89,7 @@ export function ProfileView({ wallet }: { wallet: string }) {
     <div className="max-w-6xl mx-auto px-5">
       {/* --- Profile masthead --------------------------------------------- */}
       <section className="py-8 border-b border-ink">
-        <p className="label">Athlete · The Card</p>
+        <p className="label">Profile</p>
 
         <div className="flex flex-col sm:flex-row sm:items-end gap-5 mt-4">
           {/* Avatar */}

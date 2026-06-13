@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { PortfolioView } from '@/components/PortfolioView';
 
 export const metadata: Metadata = {
-  title: 'My Bets — GymCast',
+  title: 'My Bets — the gainsXchange',
   description: 'Your positions across the board — stakes, live odds, and winnings to claim.',
 };
 

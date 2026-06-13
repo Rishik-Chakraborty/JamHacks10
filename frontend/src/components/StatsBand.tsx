@@ -17,7 +17,7 @@ export function StatsBand() {
   const cells = [
     { label: 'Open Lines', value: data ? String(openCount) : '—' },
     { label: 'SOL at Stake', value: data ? formatSol(totalStaked) : '—' },
-    { label: 'Athletes', value: data ? String(athletes) : '—' },
+    { label: 'Influencers', value: data ? String(athletes) : '—' },
     { label: 'Settled', value: data ? String(settled) : '—' },
   ];
 
