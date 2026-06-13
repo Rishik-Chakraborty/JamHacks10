@@ -17,7 +17,11 @@ import type {
   ResolveChallengeResponse,
   ChallengeDetail,
   Odds,
+  GoalReview,
+  ApiError,
 } from '../contract';
+import { env } from '../config/env';
+import { reviewGoal } from '../services/ai';
 import { ChallengeModel, challengeToDTO } from '../models/Challenge';
 import { PhotoModel, photoToDTO } from '../models/Photo';
 import { MetricModel, metricToDTO } from '../models/Metric';
@@ -60,7 +64,8 @@ const createChallengeSchema: z.ZodType<CreateChallengeBody> = z.object({
   title: z.string().min(1),
   goalText: z.string().min(1),
   successCriteria: z.string().min(1),
-  metricType: z.enum(['weight', 'bench', 'visual']),
+  metricUnit: z.string().max(16).optional(),
+  templateId: z.string().max(64).optional(),
   deadline: z.string().datetime(),
 });
 
@@ -84,17 +89,51 @@ challengesRouter.get(
 );
 
 // POST /api/challenges
+// Custom goals (no templateId) are gated by the AI reviewer: a rejected goal
+// returns 422 with feedback and is NOT created. Template-built goals are
+// pre-approved and skip review. Fails open if the AI reviewer is unreachable.
 challengesRouter.post(
   '/',
   validateBody(createChallengeSchema),
   asyncHandler(async (req, res) => {
     const body = req.body as CreateChallengeBody;
+
+    let successCriteria = body.successCriteria;
+    const isCustom = !body.templateId;
+
+    if (isCustom && env.aiEnabled) {
+      let review: GoalReview | null = null;
+      try {
+        review = await reviewGoal({
+          title: body.title,
+          goalText: body.goalText,
+          successCriteria: body.successCriteria,
+        });
+      } catch (err) {
+        // Fail open — a flaky/misconfigured reviewer must never block creation.
+        console.warn('[challenges] custom-goal review failed; allowing through:', err);
+        review = null;
+      }
+
+      if (review && !review.approved) {
+        const payload: ApiError & { review: GoalReview } = {
+          error: review.feedback || 'This custom goal was not approved.',
+          review,
+        };
+        res.status(422).json(payload);
+        return;
+      }
+      // Approved → adopt the tightened criteria when the reviewer supplied one.
+      if (review?.improvedCriteria) successCriteria = review.improvedCriteria;
+    }
+
     const doc = await ChallengeModel.create({
       creatorWallet: body.creatorWallet,
       title: body.title,
       goalText: body.goalText,
-      successCriteria: body.successCriteria,
-      metricType: body.metricType,
+      successCriteria,
+      metricUnit: body.metricUnit,
+      templateId: body.templateId,
       startDate: new Date(),
       deadline: new Date(body.deadline),
       status: 'active',

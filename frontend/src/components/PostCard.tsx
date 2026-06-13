@@ -12,14 +12,7 @@ import { Button } from '@/components/ui/Button';
 import { Tag } from '@/components/ui/Tag';
 import { OddsBar } from '@/components/ui/OddsBar';
 import { formatDate, shortWallet } from '@/lib/format';
-
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5000/api';
-
-/** Resolve a photo's image source: inline data URL, else the GridFS endpoint. */
-function photoSrc(post: FeedPost): string {
-  if (post.photo.imageData) return post.photo.imageData;
-  return `${API}/photos/${post.photo.id}/image`;
-}
+import { mediaSrc, isVideo } from '@/lib/media';
 
 /** First two characters of a wallet, uppercased — avatar fallback initials. */
 function initials(wallet: string): string {
@@ -160,21 +153,33 @@ export function PostCard({ post }: { post: FeedPost }) {
         </Link>
       </div>
 
-      {/* PHOTO */}
+      {/* MEDIA */}
       <div className="relative bg-paper-2 border-y border-ink">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={photoSrc(post)}
-          alt={photo.caption ?? `Progress shot from ${formatDate(photo.capturedAt)}`}
-          className="block w-full aspect-square object-cover"
-        />
-        {photo.isFinal && (
-          <div className="absolute top-0 left-0 m-2">
+        {isVideo(photo) ? (
+          /* eslint-disable-next-line jsx-a11y/media-has-caption */
+          <video
+            src={mediaSrc(photo)}
+            controls
+            playsInline
+            preload="metadata"
+            className="block w-full aspect-square object-cover bg-ink"
+          />
+        ) : (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={mediaSrc(photo)}
+            alt={photo.caption ?? `Progress shot from ${formatDate(photo.capturedAt)}`}
+            className="block w-full aspect-square object-cover"
+          />
+        )}
+        <div className="absolute top-0 left-0 m-2 flex gap-1.5">
+          {photo.isFinal && (
             <Tag tone="accent" solid>
               Final proof
             </Tag>
-          </div>
-        )}
+          )}
+          {isVideo(photo) && <Tag tone="ink" solid>Video</Tag>}
+        </div>
       </div>
 
       {/* MARKET STRIP */}

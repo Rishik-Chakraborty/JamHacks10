@@ -27,6 +27,7 @@ const createPhotoSchema: z.ZodType<CreatePhotoBody> = z.object({
   capturedAt: z.string().datetime(),
   imageData: z.string().min(1),
   mimeType: z.string().min(1),
+  frames: z.array(z.string().min(1)).max(8).optional(),
   metricValue: z.number().optional(),
   caption: z.string().max(280).optional(),
   isFinal: z.boolean().optional(),
@@ -77,6 +78,7 @@ photosRouter.post(
       imageData: isLarge ? undefined : body.imageData,
       gridFsId,
       mimeType: body.mimeType,
+      frames: body.frames && body.frames.length > 0 ? body.frames : undefined,
       metricValue: body.metricValue,
       caption: body.caption,
       isFinal: body.isFinal ?? false,
@@ -95,7 +97,7 @@ photosRouter.post(
       await MetricModel.create({
         challengeId,
         ts: new Date(body.capturedAt),
-        metricType: challenge.metricType,
+        unit: challenge.metricUnit ?? undefined,
         value: body.metricValue,
       });
     }

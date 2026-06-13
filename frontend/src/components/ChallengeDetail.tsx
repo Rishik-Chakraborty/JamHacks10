@@ -17,7 +17,6 @@ import { BetModule } from '@/components/BetModule';
 import { ClaimButton } from '@/components/ClaimButton';
 import { PhotoUpload } from '@/components/PhotoUpload';
 import { PhotoGallery } from '@/components/PhotoGallery';
-import { CommentsPanel } from '@/components/CommentsPanel';
 
 /** Tale-of-the-tape meta cell: tracked micro-label over a value. */
 function MetaCell({ label, children }: { label: string; children: React.ReactNode }) {
@@ -149,9 +148,11 @@ export function ChallengeDetail({ id }: { id: string }) {
               {resolved ? 'Closed' : closes}
             </span>
           </MetaCell>
-          <MetaCell label="Metric">
-            <span className="num uppercase">{c.metricType}</span>
-          </MetaCell>
+          {c.metricUnit && (
+            <MetaCell label="Metric">
+              <span className="num uppercase">{c.metricUnit}</span>
+            </MetaCell>
+          )}
         </div>
 
         {/* Winning condition aside */}
@@ -166,10 +167,9 @@ export function ChallengeDetail({ id }: { id: string }) {
         {/* LEFT */}
         <div className="space-y-8">
           <HypeMeter hypeScore={c.hypeScore} streak={c.streak} misses={c.misses} />
-          <ProgressChart metrics={c.metrics} metricType={c.metricType} />
+          <ProgressChart metrics={c.metrics} unit={c.metricUnit} />
           <PhotoUpload challenge={c} />
           <PhotoGallery photos={c.photos} />
-          <CommentsPanel challengeId={id} comments={c.comments} />
         </div>
 
         {/* RIGHT — market panel */}

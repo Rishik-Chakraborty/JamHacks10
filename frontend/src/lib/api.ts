@@ -41,6 +41,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   // users
   createUser: (body: CreateUserBody) => request<User>('/users', { method: 'POST', body: JSON.stringify(body) }),
+  /** Upsert by wallet — also used to edit your own profile. */
+  updateProfile: (body: CreateUserBody) => request<User>('/users', { method: 'POST', body: JSON.stringify(body) }),
+  searchUsers: (q: string) => request<User[]>(`/users/search?q=${encodeURIComponent(q)}`),
   getUser: (wallet: string) => request<User>(`/users/${wallet}`),
   getPositions: (wallet: string) => request<PortfolioPosition[]>(`/users/${wallet}/positions`),
   getProfile: (wallet: string, viewer?: string) =>

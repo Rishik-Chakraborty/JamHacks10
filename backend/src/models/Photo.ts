@@ -15,6 +15,8 @@ const photoSchema = new Schema(
     /** GridFS file id for large images. */
     gridFsId: { type: Schema.Types.ObjectId },
     mimeType: { type: String, required: true },
+    /** For videos: still frames (base64 JPEG data URLs) the AI oracle judges. */
+    frames: { type: [String], default: undefined },
     metricValue: { type: Number },
     caption: { type: String },
     /** Wallets that have liked this post. */
@@ -39,6 +41,7 @@ export function photoToDTO(doc: HydratedDocument<PhotoDoc>): Photo {
     imageData: doc.imageData ?? undefined,
     gridFsId: gridFsId ? gridFsId.toString() : undefined,
     mimeType: doc.mimeType,
+    frames: doc.frames && doc.frames.length > 0 ? (doc.frames as string[]) : undefined,
     metricValue: doc.metricValue ?? undefined,
     caption: doc.caption ?? undefined,
     isFinal: doc.isFinal,

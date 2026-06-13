@@ -10,14 +10,10 @@ import { Panel } from '@/components/ui/Panel';
 import { Tag } from '@/components/ui/Tag';
 import { Stat } from '@/components/ui/Stat';
 import { ChallengeCard } from '@/components/ChallengeCard';
+import { EditProfile } from '@/components/EditProfile';
+import { mediaSrc, isVideo } from '@/lib/media';
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5000/api';
-
-/** Resolve a photo's image source: inline data URL, else the GridFS endpoint. */
-function photoSrc(photo: FeedPost['photo']): string {
-  if (photo.imageData) return photo.imageData;
-  return `${API}/photos/${photo.id}/image`;
-}
 
 /** Two uppercase initials for the avatar fallback. */
 function initials(handle: string): string {
@@ -113,6 +109,11 @@ export function ProfileView({ wallet }: { wallet: string }) {
             <p className="num text-sm text-muted mt-2 break-all">{wallet}</p>
             {user?.bio && (
               <p className="text-ink-2 text-sm leading-relaxed mt-3 max-w-2xl">{user.bio}</p>
+            )}
+            {isOwn && (
+              <div className="mt-4">
+                <EditProfile wallet={wallet} user={user} />
+              </div>
             )}
           </div>
         </div>
@@ -218,21 +219,33 @@ function PostThumb({ post }: { post: FeedPost }) {
       href={`/challenge/${challenge.id}`}
       className="group relative block bg-paper-2 aspect-square overflow-hidden"
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={photoSrc(photo)}
-        alt={photo.caption || `Progress shot · ${challenge.title}`}
-        className="block w-full h-full object-cover"
-      />
+      {isVideo(photo) ? (
+        /* eslint-disable-next-line jsx-a11y/media-has-caption */
+        <video
+          src={mediaSrc(photo)}
+          muted
+          playsInline
+          preload="metadata"
+          className="block w-full h-full object-cover bg-ink"
+        />
+      ) : (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img
+          src={mediaSrc(photo)}
+          alt={photo.caption || `Progress shot · ${challenge.title}`}
+          className="block w-full h-full object-cover"
+        />
+      )}
 
-      {/* Final-proof corner tag */}
-      {photo.isFinal && (
-        <div className="absolute top-0 left-0 m-1.5">
+      {/* Corner tags */}
+      <div className="absolute top-0 left-0 m-1.5 flex gap-1.5">
+        {photo.isFinal && (
           <Tag tone="accent" solid>
             Final
           </Tag>
-        </div>
-      )}
+        )}
+        {isVideo(photo) && <Tag tone="ink" solid>Video</Tag>}
+      </div>
 
       {/* Like overlay — appears on hover */}
       <div className="absolute inset-0 bg-ink/70 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">

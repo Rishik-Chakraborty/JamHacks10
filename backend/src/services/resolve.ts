@@ -68,10 +68,26 @@ export async function resolveChallenge(
   let verdict: OracleVerdict;
 
   if (env.aiEnabled && finalPhoto) {
-    const imageBase64 = await loadPhotoBase64(finalPhoto.imageData, finalPhoto.gridFsId as Types.ObjectId | null);
+    // A video is judged from its extracted still frames; a photo from itself.
+    const frames = (finalPhoto.frames ?? []) as string[];
+    const isVideo = finalPhoto.mimeType.startsWith('video/');
+    if (isVideo && frames.length === 0) {
+      throw new HttpError(400, 'Final video has no extracted frames for the AI to evaluate.');
+    }
+    const images =
+      isVideo && frames.length > 0
+        ? frames.map((f) => ({ base64: f, mimeType: 'image/jpeg' }))
+        : [
+            {
+              base64: await loadPhotoBase64(
+                finalPhoto.imageData,
+                finalPhoto.gridFsId as Types.ObjectId | null,
+              ),
+              mimeType: finalPhoto.mimeType,
+            },
+          ];
     verdict = await evaluateGoal({
-      imageBase64,
-      mimeType: finalPhoto.mimeType,
+      images,
       goalText: challenge.goalText,
       successCriteria: challenge.successCriteria,
     });

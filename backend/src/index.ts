@@ -24,8 +24,8 @@ async function main() {
   const app = express();
   app.use(helmet());
   app.use(cors({ origin: env.corsOrigins, credentials: true }));
-  // base64 progress photos can be several MB — allow a generous JSON body.
-  app.use(express.json({ limit: '15mb' }));
+  // base64 progress photos/videos can be tens of MB — allow a generous JSON body.
+  app.use(express.json({ limit: '60mb' }));
   app.use(rateLimit({ windowMs: 60_000, max: 300, standardHeaders: true, legacyHeaders: false }));
 
   app.get('/api/health', (_req, res) => {

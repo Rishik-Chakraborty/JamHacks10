@@ -1,17 +1,10 @@
 import type { Photo } from '@/types/contract';
 import { Tag } from '@/components/ui/Tag';
 import { formatDate } from '@/lib/format';
+import { mediaSrc, isVideo } from '@/lib/media';
 
 interface Props {
   photos: Photo[];
-}
-
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5000/api';
-
-/** Resolve a photo's image source: inline data URL, else the GridFS endpoint. */
-function photoSrc(photo: Photo): string {
-  if (photo.imageData) return photo.imageData;
-  return `${API}/photos/${photo.id}/image`;
 }
 
 /** Newest-first grid of progress shots. Hard-edged thumbnails, hairline rules. */
@@ -40,19 +33,31 @@ export function PhotoGallery({ photos }: Props) {
         {ordered.map((photo) => (
           <figure key={photo.id} className="bg-card border border-line">
             <div className="relative bg-paper-2">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={photoSrc(photo)}
-                alt={`Progress shot from ${formatDate(photo.capturedAt)}`}
-                className="block w-full aspect-square object-cover"
-              />
-              {photo.isFinal && (
-                <div className="absolute top-0 left-0 m-1.5">
+              {isVideo(photo) ? (
+                /* eslint-disable-next-line jsx-a11y/media-has-caption */
+                <video
+                  src={mediaSrc(photo)}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  className="block w-full aspect-square object-cover bg-ink"
+                />
+              ) : (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={mediaSrc(photo)}
+                  alt={`Progress shot from ${formatDate(photo.capturedAt)}`}
+                  className="block w-full aspect-square object-cover"
+                />
+              )}
+              <div className="absolute top-0 left-0 m-1.5 flex gap-1.5">
+                {photo.isFinal && (
                   <Tag tone="accent" solid>
                     Final proof
                   </Tag>
-                </div>
-              )}
+                )}
+                {isVideo(photo) && <Tag tone="ink" solid>Video</Tag>}
+              </div>
             </div>
             <figcaption className="rule px-2 py-2 flex items-baseline justify-between gap-2">
               <span className="label tracking-normal text-ink-2">{formatDate(photo.capturedAt)}</span>

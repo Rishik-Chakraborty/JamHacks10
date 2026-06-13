@@ -3,7 +3,7 @@
  * state. Stored in the `challenges` collection.
  */
 import { Schema, model, type InferSchemaType, type HydratedDocument } from 'mongoose';
-import type { Challenge, MetricType, ChallengeStatus, Outcome } from '../contract';
+import type { Challenge, ChallengeStatus, Outcome } from '../contract';
 
 const challengeSchema = new Schema(
   {
@@ -11,7 +11,10 @@ const challengeSchema = new Schema(
     title: { type: String, required: true },
     goalText: { type: String, required: true },
     successCriteria: { type: String, required: true },
-    metricType: { type: String, enum: ['weight', 'bench', 'visual'], required: true },
+    /** Optional unit for the numeric progress metric (e.g. "kg", "reps"). */
+    metricUnit: { type: String },
+    /** Pre-made template id; absent = AI-approved custom goal. */
+    templateId: { type: String },
     startDate: { type: Date, required: true },
     deadline: { type: Date, required: true },
     status: { type: String, enum: ['active', 'resolved'], default: 'active' },
@@ -52,7 +55,8 @@ export function challengeToDTO(doc: HydratedDocument<ChallengeDoc>): Challenge {
     title: doc.title,
     goalText: doc.goalText,
     successCriteria: doc.successCriteria,
-    metricType: doc.metricType as MetricType,
+    metricUnit: doc.metricUnit ?? undefined,
+    templateId: doc.templateId ?? undefined,
     startDate: doc.startDate.toISOString(),
     deadline: doc.deadline.toISOString(),
     status: doc.status as ChallengeStatus,

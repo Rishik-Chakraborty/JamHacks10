@@ -3,13 +3,14 @@
  * Stored in the `metrics` collection (queried as a time series by challenge).
  */
 import { Schema, model, type InferSchemaType, type HydratedDocument } from 'mongoose';
-import type { MetricPoint, MetricType } from '../contract';
+import type { MetricPoint } from '../contract';
 
 const metricSchema = new Schema(
   {
     challengeId: { type: Schema.Types.ObjectId, ref: 'Challenge', required: true },
     ts: { type: Date, required: true },
-    metricType: { type: String, enum: ['weight', 'bench', 'visual'], required: true },
+    /** Optional unit label carried from the challenge (e.g. "kg"). */
+    unit: { type: String },
     value: { type: Number, required: true },
   },
   { collection: 'metrics' },
@@ -26,7 +27,7 @@ export function metricToDTO(doc: HydratedDocument<MetricDoc>): MetricPoint {
   return {
     challengeId: doc.challengeId.toString(),
     ts: doc.ts.toISOString(),
-    metricType: doc.metricType as MetricType,
+    unit: doc.unit ?? undefined,
     value: doc.value,
   };
 }

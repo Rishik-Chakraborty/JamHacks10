@@ -14,7 +14,7 @@ import type { MetricPoint } from '@/types/contract';
 
 interface Props {
   metrics: MetricPoint[];
-  metricType?: string;
+  unit?: string;
 }
 
 const INK = '#17150f';
@@ -30,7 +30,7 @@ function shortDate(iso: string): string {
  * Flat editorial progress line. No area gradient, no shadow — a thin ink trend
  * line over a dashed hairline grid, monospace ticks.
  */
-export function ProgressChart({ metrics, metricType }: Props) {
+export function ProgressChart({ metrics, unit }: Props) {
   const data = useMemo(
     () =>
       [...metrics]
@@ -43,7 +43,7 @@ export function ProgressChart({ metrics, metricType }: Props) {
     <section>
       <div className="flex items-baseline justify-between">
         <h3 className="label text-ink">Progress</h3>
-        {metricType ? <span className="label">{metricType}</span> : null}
+        {unit ? <span className="label">{unit}</span> : null}
       </div>
       <div className="rule-ink mt-1.5" />
 

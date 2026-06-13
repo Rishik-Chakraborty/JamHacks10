@@ -37,6 +37,26 @@ usersRouter.post(
   }),
 );
 
+// GET /api/users/search?q= — find users by username or wallet (prefix/substring).
+// Declared BEFORE the /:wallet route so "search" isn't swallowed as a wallet.
+usersRouter.get(
+  '/search',
+  asyncHandler(async (req, res) => {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    if (q.length === 0) {
+      res.json([]);
+      return;
+    }
+    // Escape regex metacharacters so user input is treated literally.
+    const safe = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rx = new RegExp(safe, 'i');
+    const docs = await UserModel.find({ $or: [{ username: rx }, { wallet: rx }] })
+      .limit(15)
+      .sort({ username: 1 });
+    res.json(docs.map(userToDTO));
+  }),
+);
+
 // GET /api/users/:wallet
 usersRouter.get(
   '/:wallet',

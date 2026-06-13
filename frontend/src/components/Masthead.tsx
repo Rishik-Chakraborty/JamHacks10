@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { UserSearch } from '@/components/UserSearch';
 
 // Wallet button is browser-only — load client-side to avoid hydration mismatch.
 const WalletMultiButton = dynamic(
@@ -10,6 +12,9 @@ const WalletMultiButton = dynamic(
 );
 
 export function Masthead() {
+  const { publicKey } = useWallet();
+  const wallet = publicKey?.toBase58();
+
   return (
     <header className="bg-paper sticky top-0 z-30">
       <div className="max-w-6xl mx-auto px-5 py-3 flex items-end justify-between gap-4">
@@ -33,12 +38,21 @@ export function Masthead() {
           <Link href="/portfolio" className="hidden sm:inline display uppercase text-base text-ink hover:text-accent transition-colors">
             My Bets
           </Link>
+          {wallet && (
+            <Link
+              href={`/u/${wallet}`}
+              className="hidden sm:inline display uppercase text-base text-ink hover:text-accent transition-colors"
+            >
+              Profile
+            </Link>
+          )}
           <Link
             href="/create"
             className="hidden sm:inline display uppercase text-base text-ink hover:text-accent transition-colors"
           >
             Open a Line
           </Link>
+          <UserSearch />
           <WalletMultiButton />
         </nav>
       </div>

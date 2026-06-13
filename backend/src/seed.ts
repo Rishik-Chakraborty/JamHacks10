@@ -64,7 +64,6 @@ async function seed() {
     goalText: 'Greg will have a clearly visible bicep vein (cephalic vein) when flexed.',
     successCriteria:
       'A distinct, raised vein is clearly visible along the front of the flexed upper arm in good lighting, unobstructed.',
-    metricType: 'visual',
     startDate: daysFromNow(-6),
     deadline: daysFromNow(14),
     status: 'active',
@@ -102,7 +101,8 @@ async function seed() {
     title: 'Bench press 100kg by August',
     goalText: 'Greg will bench press 100kg for one clean rep.',
     successCriteria: 'A single full-range 100kg barbell bench rep on video with a visible plate count.',
-    metricType: 'bench',
+    metricUnit: 'kg',
+    templateId: 'bench',
     startDate: daysFromNow(-20),
     deadline: daysFromNow(30),
     status: 'active',
@@ -119,7 +119,7 @@ async function seed() {
     [82, 84, 85, 87, 88, 90, 91].map((value, i) => ({
       challengeId: c2._id,
       ts: daysFromNow(-20 + i * 3),
-      metricType: 'bench' as const,
+      unit: 'kg' as const,
       value,
     })),
   );
@@ -139,7 +139,8 @@ async function seed() {
     title: 'Cut to 75kg bodyweight',
     goalText: 'Greg will reach 75kg bodyweight.',
     successCriteria: 'Scale photo reading 75.0kg or below with face in frame.',
-    metricType: 'weight',
+    metricUnit: 'kg',
+    templateId: 'bodyweight',
     startDate: daysFromNow(-40),
     deadline: daysFromNow(-1),
     status: 'resolved',
@@ -156,7 +157,7 @@ async function seed() {
     [82, 81, 80, 78.5, 77, 76, 74.8].map((value, i) => ({
       challengeId: c3._id,
       ts: daysFromNow(-40 + i * 6),
-      metricType: 'weight' as const,
+      unit: 'kg' as const,
       value,
     })),
   );

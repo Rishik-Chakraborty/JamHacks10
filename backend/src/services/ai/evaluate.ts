@@ -19,9 +19,18 @@ import type { OracleVerdict } from '../../contract';
 import { MIN_CONFIDENCE } from '../../contract';
 import { ORACLE_SYSTEM_PROMPT, buildOracleUserText } from './prompts';
 
-export interface EvaluateGoalParams {
-  imageBase64: string;
+export interface EvaluateImage {
+  /** Raw base64 or a full data URL. */
+  base64: string;
   mimeType: string;
+}
+
+export interface EvaluateGoalParams {
+  /**
+   * The proof to judge: a single photo, or several frames sampled from a video
+   * (chronological order). At least one is required.
+   */
+  images: EvaluateImage[];
   goalText: string;
   successCriteria: string;
 }
@@ -77,8 +86,14 @@ export async function evaluateGoal(params: EvaluateGoalParams): Promise<OracleVe
   if (!env.aiEnabled) {
     throw new Error('AI oracle not configured: set OPENAI_API_KEY to enable verdicts.');
   }
+  if (params.images.length === 0) {
+    throw new Error('No proof images provided to the AI oracle.');
+  }
 
-  const dataUrl = toDataUrl(params.imageBase64, params.mimeType);
+  const imageParts = params.images.map((img) => ({
+    type: 'image_url' as const,
+    image_url: { url: toDataUrl(img.base64, img.mimeType), detail: 'high' as const },
+  }));
 
   const completion = await client().beta.chat.completions.parse({
     model: env.OPENAI_VISION_MODEL,
@@ -87,8 +102,11 @@ export async function evaluateGoal(params: EvaluateGoalParams): Promise<OracleVe
       {
         role: 'user',
         content: [
-          { type: 'text', text: buildOracleUserText(params.goalText, params.successCriteria) },
-          { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
+          {
+            type: 'text',
+            text: buildOracleUserText(params.goalText, params.successCriteria, params.images.length),
+          },
+          ...imageParts,
         ],
       },
     ],
@@ -175,8 +193,9 @@ async function querySecondaryOracle(
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          imageBase64: params.imageBase64,
-          mimeType: params.mimeType,
+          // Primary frame is representative enough for the second-opinion check.
+          imageBase64: params.images[0]?.base64,
+          mimeType: params.images[0]?.mimeType,
           goalText: params.goalText,
           successCriteria: params.successCriteria,
         }),

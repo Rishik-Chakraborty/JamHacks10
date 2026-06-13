@@ -19,7 +19,7 @@
  */
 export const ORACLE_SYSTEM_PROMPT = `You are the GymCast Oracle — the impartial, final judge of a fitness prediction market. Real money (a parimutuel pool) is paid out based solely on your verdict, so you must be rigorous, skeptical, and evidence-driven. You are NOT a cheerleader.
 
-You are given ONE final photo, the creator's GOAL (context only), and a precise SUCCESS CRITERIA. Your job: decide whether the photo proves the SUCCESS CRITERIA was met.
+You are given the creator's final PROOF, the creator's GOAL (context only), and a precise SUCCESS CRITERIA. The proof is one or more still images: a single photo, OR several frames sampled across a video (in chronological order) — treat multiple frames as one continuous piece of evidence showing a motion over time (e.g. a full lift or a set of reps). Your job: decide whether the proof shows the SUCCESS CRITERIA was met.
 
 RUBRIC — follow exactly:
 1. Judge ONLY the stated SUCCESS CRITERIA. Do not reward effort, vibes, or partial progress. The GOAL is background context; the SUCCESS CRITERIA is the contract.
@@ -35,14 +35,53 @@ RUBRIC — follow exactly:
 Return your structured verdict. \`met\` is your best binary call; \`confidence\` reflects how sure you are that \`met\` is correct; \`reasoning\` is a brief justification tied to the evidence; \`observedEvidence\` is the list of concrete visual facts you used.`;
 
 /** Builds the user turn text that frames the goal + criteria for a single eval. */
-export function buildOracleUserText(goalText: string, successCriteria: string): string {
+export function buildOracleUserText(goalText: string, successCriteria: string, frameCount = 1): string {
+  const proofDesc =
+    frameCount > 1
+      ? `the ${frameCount} attached video frames (chronological order)`
+      : 'the attached final photo';
   return [
-    'Evaluate the attached final photo against this challenge.',
+    `Evaluate ${proofDesc} against this challenge.`,
     '',
     `GOAL (context only): ${goalText}`,
     `SUCCESS CRITERIA (judge ONLY this): ${successCriteria}`,
     '',
-    'Decide whether the SUCCESS CRITERIA is met, citing only evidence visible in the photo. Be conservative — if the proof is not clearly visible, keep confidence below 0.6 so a human reviews it.',
+    `Decide whether the SUCCESS CRITERIA is met, citing only evidence visible in the proof. Be conservative — if the proof is not clearly visible, keep confidence below 0.6 so a human reviews it.`,
+  ].join('\n');
+}
+
+/* -------------------------------------------------------------------------- */
+/* Custom-goal reviewer (gates whether a non-template challenge may be created) */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Standards a custom goal must meet to be auto-approved. The reviewer is strict:
+ * a fitness market only works if a stranger with the final proof could rule on
+ * the outcome the same way the AI oracle will.
+ */
+export const GOAL_REVIEW_SYSTEM_PROMPT = `You are the GymCast goal reviewer — the gatekeeper that decides whether a user-submitted custom fitness challenge is allowed to open a real-money prediction market. A challenge is later judged by a vision AI that looks ONLY at a final photo or short video and rules YES/NO. So you must reject anything that can't be settled fairly from such proof.
+
+APPROVE a goal only if ALL of these hold:
+1. FITNESS-RELATED: it is a genuine physical-fitness / training / body-composition goal.
+2. OBJECTIVELY VERIFIABLE FROM A PHOTO OR SHORT VIDEO: the success criteria can be ruled on by looking at one final image or a few video frames (e.g. a lift completed, a number of reps, a scale/app reading, a visibly held position). Reject goals that need data the camera can't show (heart rate over weeks, "felt stronger", sleep, diet adherence, internal feelings).
+3. UNAMBIGUOUS & MEASURABLE: there is a clear, concrete threshold (a weight, a count, a distance, a time, a clearly described visible state). Reject vague/subjective goals ("get shredded", "look better", "be healthier") unless they pin a checkable visible state.
+4. SELF-CONTAINED & TIME-BOUNDED BY THE DEADLINE: achievable and checkable at the deadline.
+5. SAFE & APPROPRIATE: not dangerous, hateful, sexual, or encouraging harm/disordered behaviour.
+
+When you APPROVE, also return an improvedCriteria: a tightened, single-paragraph success criteria written so the vision oracle can rule on it from the final proof (specify exactly what must be visible). When you REJECT, feedback must clearly say WHY and exactly what the user should change to pass.
+
+Be helpful but strict. Borderline-but-fixable → reject with concrete guidance. Clearly fine → approve.`;
+
+/** User turn for the goal reviewer. */
+export function buildGoalReviewUserText(title: string, goalText: string, successCriteria: string): string {
+  return [
+    'Review this custom challenge submission:',
+    '',
+    `TITLE: ${title}`,
+    `GOAL: ${goalText}`,
+    `SUCCESS CRITERIA: ${successCriteria}`,
+    '',
+    'Decide whether it meets the standards. If approved, provide a tightened improvedCriteria. If rejected, explain what to fix.',
   ].join('\n');
 }
 

@@ -10,5 +10,7 @@
  * image payloads are never logged.
  */
 export { evaluateGoal } from './evaluate';
-export type { EvaluateGoalParams } from './evaluate';
+export type { EvaluateGoalParams, EvaluateImage } from './evaluate';
+export { reviewGoal } from './reviewGoal';
+export type { ReviewGoalParams } from './reviewGoal';
 export { generateCommentary } from './commentary';
