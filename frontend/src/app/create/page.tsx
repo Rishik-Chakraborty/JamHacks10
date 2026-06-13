@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import { CreateChallengeForm } from '@/components/CreateChallengeForm';
 
 export const metadata: Metadata = {
-  title: 'Open a Line — GymCast',
-  description: 'Put a fitness goal on the board and let the market call your bluff.',
+  title: 'Challenge an Influencer — GymCast',
+  description: 'Challenge an influencer to a fitness goal and let the market call it.',
 };
 
 export default function CreatePage() {
@@ -12,10 +12,11 @@ export default function CreatePage() {
       {/* Masthead-style heading */}
       <section className="py-8 border-b border-ink">
         <p className="label">New Bout · The Card</p>
-        <h1 className="display text-5xl sm:text-6xl text-ink mt-2 max-w-3xl">Open a line</h1>
+        <h1 className="display text-5xl sm:text-6xl text-ink mt-2 max-w-3xl">Challenge an influencer</h1>
         <p className="text-ink-2 text-sm leading-relaxed mt-3 max-w-2xl">
-          Declare a real fitness goal with a hard deadline. Spectators will stake SOL on whether you
-          deliver. At the bell, an AI judge reads your final proof against the criteria you set.
+          Call out an influencer with a hard fitness goal and a deadline, and seed the first bet. If
+          they accept, the board stakes SOL on whether they deliver. At the bell, an AI judge reads
+          their final proof against the criteria.
         </p>
       </section>
 

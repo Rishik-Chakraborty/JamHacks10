@@ -16,6 +16,7 @@ import { connectDb } from './config/db';
 import { mountRoutes } from './routes';
 import { errorHandler, notFound } from './middleware/error';
 import { initRealtime, setIo } from './realtime';
+import { startScheduler } from './services/scheduler';
 import { SOCKET_EVENTS } from './contract';
 
 async function main() {
@@ -47,6 +48,7 @@ async function main() {
   });
 
   await initRealtime(io);
+  startScheduler();
 
   server.listen(env.PORT, () => {
     console.log(`🚀 GymCast backend on http://localhost:${env.PORT}`);

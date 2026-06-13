@@ -9,9 +9,11 @@ import { photosRouter, challengePhotosRouter } from './photos';
 import { betsRouter, challengeBetsRouter, userPositionsRouter } from './bets';
 import { feedRouter, photoLikeRouter, profileRouter } from './feed';
 import { commentsRouter, challengeCommentsRouter } from './comments';
+import { linesRouter } from './lines';
 
 export function mountRoutes(app: Express): void {
   app.use('/api/feed', feedRouter);
+  app.use('/api/lines', linesRouter);
   app.use('/api/users', userPositionsRouter);
   app.use('/api/users', profileRouter);
   app.use('/api/users', usersRouter);

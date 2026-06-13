@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { CreateBetBody, PortfolioPosition } from '../contract';
 import { BetModel, betToDTO } from '../models/Bet';
 import { ChallengeModel, challengeToDTO } from '../models/Challenge';
+import { computeBetPayout } from '../services/payouts';
 import { validateBody, asyncHandler } from '../middleware/validate';
 import { HttpError } from '../middleware/error';
 
@@ -42,6 +43,23 @@ betsRouter.post(
 
     const challenge = await ChallengeModel.findById(challengeId);
     if (!challenge) throw new HttpError(404, 'Challenge not found');
+
+    // --- Line-integrity guards (defense-in-depth; UI enforces these too) ------
+    if (challenge.status !== 'active') {
+      const msg =
+        challenge.status === 'pending_accept'
+          ? "This line is still awaiting the influencer's acceptance"
+          : challenge.status === 'refunded'
+            ? 'This line was refunded'
+            : 'Betting is closed for this line';
+      throw new HttpError(409, msg);
+    }
+    if (body.bettorWallet === challenge.creatorWallet) {
+      throw new HttpError(403, "The influencer can't bet on their own line");
+    }
+    if (challenge.betLockAt && Date.now() >= challenge.betLockAt.getTime()) {
+      throw new HttpError(409, 'Betting is locked — within the final window before the deadline');
+    }
 
     // Was this tx already mirrored? Idempotency guard before mutating pools.
     const existing = await BetModel.findOne({ txSig: body.txSig });
@@ -115,7 +133,17 @@ userPositionsRouter.get(
     const positions: PortfolioPosition[] = [];
     for (const bet of bets) {
       const challenge = byId.get(bet.challengeId.toString());
-      if (challenge) positions.push({ bet: betToDTO(bet), challenge: challengeToDTO(challenge) });
+      if (!challenge) continue;
+      const cDto = challengeToDTO(challenge);
+      const bDto = betToDTO(bet);
+      const payout = computeBetPayout(cDto, bDto);
+      positions.push({
+        bet: bDto,
+        challenge: cDto,
+        payoutLamports: payout?.payoutLamports,
+        won: payout?.won,
+        refunded: payout?.refunded,
+      });
     }
     res.json(positions);
   }),

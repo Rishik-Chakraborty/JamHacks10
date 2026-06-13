@@ -12,6 +12,7 @@ import { PhotoModel, photoToDTO } from '../models/Photo';
 import { ChallengeModel } from '../models/Challenge';
 import { MetricModel } from '../models/Metric';
 import { getBucket } from '../config/db';
+import { reviewChallenge } from '../services/resolve';
 import { validateBody, asyncHandler } from '../middleware/validate';
 import { HttpError } from '../middleware/error';
 
@@ -103,6 +104,14 @@ photosRouter.post(
     }
 
     res.status(201).json(photoToDTO(doc));
+
+    // Posting final proof kicks off the AI Trusted Oracle review (best-effort,
+    // async — never blocks the upload). Sets the line to under_review + verdict.
+    if (body.isFinal) {
+      void reviewChallenge(body.challengeId).catch((e) =>
+        console.warn('[photos] oracle review trigger failed:', e),
+      );
+    }
   }),
 );
 

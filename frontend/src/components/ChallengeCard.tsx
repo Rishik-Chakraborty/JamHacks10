@@ -15,20 +15,46 @@ export function ChallengeCard({ challenge: c }: { challenge: Challenge }) {
   return (
     <Link href={`/challenge/${c.id}`} className="block">
       <Panel interactive className="p-4 h-full flex flex-col">
-        {/* Top meta row */}
+        {/* Top meta row — three states: live "Open", grey "Closed" (deadline
+            passed, awaiting settlement), and a coloured "Settled" tag. */}
         <div className="flex items-center justify-between">
           {resolved ? (
             <Tag tone={c.outcome === 'yes' ? 'yes' : 'no'} solid>
               Settled {c.outcome ?? ''}
             </Tag>
+          ) : c.status === 'refunded' ? (
+            <Tag tone="muted" solid>Refunded</Tag>
+          ) : c.status === 'pending_accept' ? (
+            <Tag tone="accent">Pending</Tag>
+          ) : c.status === 'under_review' ? (
+            <Tag tone="ink" solid>Review</Tag>
+          ) : c.status === 'disputed' ? (
+            <Tag tone="accent" solid>Disputed</Tag>
+          ) : ended ? (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2 w-2 bg-muted inline-block" />
+              <span className="label text-muted">Closed</span>
+            </span>
           ) : (
             <span className="inline-flex items-center gap-1.5">
               <span className="live-tick" />
               <span className="label text-ink">Open</span>
             </span>
           )}
-          <span className={`label tracking-normal ${ended && !resolved ? 'text-accent' : 'text-muted'}`}>
-            {resolved ? 'Closed' : `Closes in ${deadline}`}
+          <span className="label tracking-normal text-muted">
+            {resolved
+              ? 'Closed'
+              : c.status === 'refunded'
+                ? 'Refunded'
+                : c.status === 'pending_accept'
+                  ? 'Awaiting accept'
+                  : c.status === 'under_review'
+                    ? 'In review'
+                    : c.status === 'disputed'
+                      ? 'Disputed'
+                      : ended
+                        ? 'Awaiting result'
+                        : `Closes in ${deadline}`}
           </span>
         </div>
 

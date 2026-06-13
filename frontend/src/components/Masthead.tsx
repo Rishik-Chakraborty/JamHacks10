@@ -29,6 +29,9 @@ export function Masthead() {
           <Link href="/" className="hidden sm:inline display uppercase text-base text-ink hover:text-accent transition-colors">
             Markets
           </Link>
+          <Link href="/lines" className="hidden sm:inline display uppercase text-base text-ink hover:text-accent transition-colors">
+            Lines
+          </Link>
           <Link href="/feed" className="hidden sm:inline display uppercase text-base text-ink hover:text-accent transition-colors">
             Feed
           </Link>

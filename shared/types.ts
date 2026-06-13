@@ -10,7 +10,13 @@
  * Enums / unions
  * ------------------------------------------------------------------------- */
 
-export type ChallengeStatus = 'active' | 'resolved';
+export type ChallengeStatus =
+  | 'pending_accept' // challenger proposed it; awaiting the influencer's acceptance
+  | 'active' // accepted; open for betting
+  | 'under_review' // final proof posted; oracle verdict in, dispute window open
+  | 'disputed' // someone contested the verdict → held for manual resolution
+  | 'resolved' // settled YES/NO
+  | 'refunded'; // influencer declined / no-showed → stakes returned
 /** null = unresolved, 'yes' = goal met, 'no' = goal not met */
 export type Outcome = 'yes' | 'no' | null;
 export type BetSide = 'yes' | 'no';
@@ -31,6 +37,18 @@ export const LAMPORTS_PER_SOL = 1_000_000_000;
 /** AI verdict confidence below this routes to manual override before resolve. */
 export const MIN_CONFIDENCE = 0.6;
 
+/** Bets lock this many hours before the deadline (anti last-minute manipulation). */
+export const BET_LOCK_HOURS = 12;
+/** Influencer must accept a line within this many hours, else it refunds. */
+export const ACCEPT_WINDOW_HOURS = 48;
+/** After the oracle verdict, disputes are open for this many hours before auto-finalize. */
+export const DISPUTE_WINDOW_HOURS = 24;
+/** Influencer must post final proof within this many hours after the deadline, else refund (no-show). */
+export const PROOF_GRACE_HOURS = 24;
+/** Default fee split (basis points). 500 = 5% creator, 250 = 2.5% platform. */
+export const DEFAULT_CREATOR_FEE_BPS = 500;
+export const DEFAULT_PLATFORM_FEE_BPS = 250;
+
 /* ----------------------------------------------------------------------------
  * Domain documents (as returned by the API — `_id` serialized to string `id`)
  * ------------------------------------------------------------------------- */
@@ -41,12 +59,35 @@ export interface User {
   username: string;
   avatar?: string;
   bio?: string;
+  /** Opted into creator mode — can accept lines challenging them. */
+  isCreator?: boolean;
+  /** Social graph counts (populated on profile/user fetches). */
+  followerCount?: number;
+  followingCount?: number;
+  /** True once followerCount ≥ CREATOR_PROGRAM_FOLLOWER_THRESHOLD — earns the pool cut. */
+  creatorProgram?: boolean;
+  /** Reputation: number of accepted lines the influencer no-showed (didn't post final proof). */
+  noShows?: number;
   createdAt: string; // ISO
+}
+
+/** Follower count at/above this unlocks the creator program (earns the pool cut). */
+export const CREATOR_PROGRAM_FOLLOWER_THRESHOLD = 10;
+
+/** Result of toggling a follow on a user. */
+export interface FollowResult {
+  /** The wallet being followed/unfollowed. */
+  wallet: string;
+  following: boolean;
+  followerCount: number;
 }
 
 export interface Challenge {
   id: string;
+  /** The influencer / subject of the line — posts proof, appears on the card. */
   creatorWallet: string;
+  /** Who proposed (challenged) this line. Absent on legacy self-created challenges. */
+  challengerWallet?: string;
   title: string;
   goalText: string;
   /** Precise, checkable success criteria fed to the AI oracle at resolution. */
@@ -58,6 +99,21 @@ export interface Challenge {
   startDate: string; // ISO
   deadline: string; // ISO
   status: ChallengeStatus;
+
+  /** Influencer must accept before this time, else the line refunds. */
+  acceptDeadline?: string; // ISO
+  /** Bets lock at this time (deadline − BET_LOCK_HOURS). */
+  betLockAt?: string; // ISO
+  /** Fee split applied at resolution (basis points of the pool). */
+  creatorFeeBps?: number;
+  platformFeeBps?: number;
+
+  /** Trusted-oracle verdict on the final proof (set when entering under_review). */
+  verdict?: OracleVerdict;
+  /** Outcome the oracle proposes; null when it needs manual review. */
+  proposedOutcome?: Outcome;
+  /** Disputes accepted until this time; after it the line auto-finalizes. */
+  disputeWindowEndsAt?: string; // ISO
 
   // On-chain references (populated after initialize_market)
   marketPda?: string;
@@ -77,6 +133,10 @@ export interface Challenge {
   streak: number;
   misses: number;
   lastPostAt?: string; // ISO
+  /** Number of wallets that liked this line. */
+  likeCount?: number;
+  /** Whether the requesting viewer liked it (populated on viewer-aware endpoints). */
+  likedByMe?: boolean;
 
   createdAt: string; // ISO
 }
@@ -152,6 +212,21 @@ export interface Odds {
   hasMarket: boolean;
 }
 
+/** Realized payout split at resolution (mirrors the on-chain claim math). */
+export interface Settlement {
+  outcome: BetSide;
+  totalPoolLamports: number;
+  winningPoolLamports: number;
+  losingPoolLamports: number;
+  /** The influencer's creator-program cut, taken from the losing pool. */
+  creatorPayoutLamports: number;
+  platformPayoutLamports: number;
+  /** Remaining losing pool, split proportionally among the winners. */
+  distributableLamports: number;
+  /** True when one-sided / no winners → all stakes refunded, no fees. */
+  refunded: boolean;
+}
+
 /* ----------------------------------------------------------------------------
  * AI oracle verdict — see backend/src/services/ai
  * ------------------------------------------------------------------------- */
@@ -182,8 +257,15 @@ export interface CreateUserBody {
   bio?: string;
 }
 
+/**
+ * Create a line: a challenger proposes a goal for an influencer and seeds the
+ * first bet. The line opens as `pending_accept` until the influencer accepts.
+ */
 export interface CreateChallengeBody {
-  creatorWallet: string;
+  /** Who is proposing the line. */
+  challengerWallet: string;
+  /** Who is being challenged (becomes the line's creatorWallet / subject). */
+  influencerWallet: string;
   title: string;
   goalText: string;
   successCriteria: string;
@@ -192,6 +274,26 @@ export interface CreateChallengeBody {
   /** Set when built from a pre-made template (skips AI review). Absent = custom goal → AI-reviewed. */
   templateId?: string;
   deadline: string; // ISO
+  /** The challenger's conviction — which side they seed. */
+  seedSide: BetSide;
+  /** The challenger's seed stake (lamports). */
+  seedAmountLamports: number;
+}
+
+/** Influencer accepts a line challenging them (caller must be the influencer). */
+export interface AcceptLineBody {
+  influencerWallet: string;
+}
+
+/** Influencer declines a line (refunds the challenger's seed). */
+export interface DeclineLineBody {
+  influencerWallet: string;
+}
+
+/** Contest the oracle verdict during the dispute window. */
+export interface DisputeLineBody {
+  wallet: string;
+  reason?: string;
 }
 
 /**
@@ -264,12 +366,18 @@ export interface ChallengeDetail extends Challenge {
   metrics: MetricPoint[];
   recentBets: Bet[];
   comments: Comment[];
+  /** Realized payout split — present once the line is resolved. */
+  settlement?: Settlement;
 }
 
 /** A bettor's position: their bet joined with the market it was placed on. */
 export interface PortfolioPosition {
   bet: Bet;
   challenge: Challenge;
+  /** Realized payout for this bet once resolved (stake back + winnings, or refund). */
+  payoutLamports?: number;
+  won?: boolean;
+  refunded?: boolean;
 }
 
 /** An Instagram-style progress post for the social feed. */
@@ -290,6 +398,10 @@ export interface Profile {
   user: User | null;
   challenges: Challenge[];
   posts: FeedPost[];
+  /** Whether the requesting viewer follows this wallet. */
+  isFollowedByViewer?: boolean;
+  /** Total creator-program earnings as the influencer across resolved lines (lamports). */
+  creatorEarningsLamports?: number;
 }
 
 /** Result of toggling a like on a photo. */
@@ -491,15 +603,22 @@ export const API_ROUTES = {
   getUser: 'GET /api/users/:wallet',
   getPositions: 'GET /api/users/:wallet/positions',
   getProfile: 'GET /api/users/:wallet/profile',
-  // social feed
-  feed: 'GET /api/feed',
+  toggleFollow: 'POST /api/users/:wallet/follow', // body { follower }
+  listFollowing: 'GET /api/users/:wallet/following',
+  // social feed + discovery
+  feed: 'GET /api/feed', // ?wallet= → follow-weighted ranking
+  rankedLines: 'GET /api/lines', // ?wallet= → suggestion-ranked open lines
   toggleLike: 'POST /api/photos/:id/like',
+  likeLine: 'POST /api/challenges/:id/like', // body { wallet }
   // challenges
   listChallenges: 'GET /api/challenges',
   createChallenge: 'POST /api/challenges',
   getChallenge: 'GET /api/challenges/:id', // → ChallengeDetail
+  acceptLine: 'POST /api/challenges/:id/accept',
+  declineLine: 'POST /api/challenges/:id/decline',
   attachMarket: 'POST /api/challenges/:id/market',
-  resolveChallenge: 'POST /api/challenges/:id/resolve',
+  resolveChallenge: 'POST /api/challenges/:id/resolve', // advance resolution (review → finalize)
+  disputeLine: 'POST /api/challenges/:id/dispute',
   challengeOdds: 'GET /api/challenges/:id/odds',
   // photos
   listPhotos: 'GET /api/challenges/:id/photos',

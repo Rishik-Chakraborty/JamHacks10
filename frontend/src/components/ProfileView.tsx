@@ -11,6 +11,7 @@ import { Tag } from '@/components/ui/Tag';
 import { Stat } from '@/components/ui/Stat';
 import { ChallengeCard } from '@/components/ChallengeCard';
 import { EditProfile } from '@/components/EditProfile';
+import { FollowButton } from '@/components/FollowButton';
 import { mediaSrc, isVideo } from '@/lib/media';
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5000/api';
@@ -70,12 +71,16 @@ export function ProfileView({ wallet }: { wallet: string }) {
 
   if (!data) return null;
 
-  const { user, challenges, posts } = data;
+  const { user, challenges, posts, creatorEarningsLamports } = data;
   const handle = user?.username || shortWallet(wallet);
   const totalPool = challenges.reduce((sum, c) => sum + c.yesPoolLamports + c.noPoolLamports, 0);
 
-  const active = challenges.filter((c) => c.status === 'active');
-  const settled = challenges.filter((c) => c.status !== 'active');
+  // A line is "open" only while active AND before its deadline. Past-deadline
+  // lines (awaiting settlement) and resolved lines are grouped as closed.
+  const now = Date.now();
+  const isOpen = (ch: Challenge) => ch.status === 'active' && new Date(ch.deadline).getTime() > now;
+  const open = challenges.filter(isOpen);
+  const closed = challenges.filter((ch) => !isOpen(ch));
 
   return (
     <div className="max-w-6xl mx-auto px-5">
@@ -104,22 +109,40 @@ export function ProfileView({ wallet }: { wallet: string }) {
           <div className="min-w-0">
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="display text-4xl sm:text-6xl text-ink break-words">{handle}</h1>
-              {isOwn && <Tag tone="accent">This is you</Tag>}
+              {user?.creatorProgram && <Tag tone="accent" solid>Creator</Tag>}
+              {user?.noShows ? <Tag tone="no">{user.noShows} no-show{user.noShows === 1 ? '' : 's'}</Tag> : null}
+              {isOwn && <Tag tone="muted">This is you</Tag>}
             </div>
             <p className="num text-sm text-muted mt-2 break-all">{wallet}</p>
+
+            {/* Follower / following counts */}
+            <div className="flex items-center gap-5 mt-3">
+              <span className="text-sm text-ink-2">
+                <span className="num text-ink font-semibold">{user?.followerCount ?? 0}</span>{' '}
+                <span className="text-muted">followers</span>
+              </span>
+              <span className="text-sm text-ink-2">
+                <span className="num text-ink font-semibold">{user?.followingCount ?? 0}</span>{' '}
+                <span className="text-muted">following</span>
+              </span>
+            </div>
+
             {user?.bio && (
               <p className="text-ink-2 text-sm leading-relaxed mt-3 max-w-2xl">{user.bio}</p>
             )}
-            {isOwn && (
-              <div className="mt-4">
+
+            <div className="mt-4 flex items-center gap-3">
+              {isOwn ? (
                 <EditProfile wallet={wallet} user={user} />
-              </div>
-            )}
+              ) : (
+                <FollowButton targetWallet={wallet} initialFollowing={data.isFollowedByViewer ?? false} />
+              )}
+            </div>
           </div>
         </div>
 
         {/* Stat row */}
-        <div className="grid grid-cols-3 gap-px bg-line border border-line mt-6">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-line border border-line mt-6">
           <Stat className="bg-card p-4" label="Lines" value={challenges.length} />
           <Stat className="bg-card p-4" label="Posts" value={posts.length} />
           <Stat
@@ -128,6 +151,15 @@ export function ProfileView({ wallet }: { wallet: string }) {
             value={
               <>
                 {formatSol(totalPool)} <span className="text-faint text-sm">SOL</span>
+              </>
+            }
+          />
+          <Stat
+            className="bg-card p-4"
+            label="Earned"
+            value={
+              <>
+                {formatSol(creatorEarningsLamports ?? 0)} <span className="text-faint text-sm">SOL</span>
               </>
             }
             tone="accent"
@@ -148,10 +180,10 @@ export function ProfileView({ wallet }: { wallet: string }) {
           {/* --- Lines ----------------------------------------------------- */}
           {challenges.length > 0 && (
             <section className="py-7">
-              <LineGroup title="Open Lines" challenges={active} side="open" />
-              {settled.length > 0 && (
+              <LineGroup title="Open Lines" challenges={open} side="open" />
+              {closed.length > 0 && (
                 <div className="mt-10">
-                  <LineGroup title="Settled" challenges={settled} side="settled" />
+                  <LineGroup title="Closed & Settled" challenges={closed} side="settled" />
                 </div>
               )}
             </section>

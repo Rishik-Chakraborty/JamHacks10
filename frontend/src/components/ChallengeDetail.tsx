@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useWallet } from '@solana/wallet-adapter-react';
 import type { ChallengeDetail as ChallengeDetailType } from '@/types/contract';
 import { api } from '@/lib/api';
 import { onHype } from '@/lib/socket';
@@ -17,6 +18,10 @@ import { BetModule } from '@/components/BetModule';
 import { ClaimButton } from '@/components/ClaimButton';
 import { PhotoUpload } from '@/components/PhotoUpload';
 import { PhotoGallery } from '@/components/PhotoGallery';
+import { AcceptLine } from '@/components/AcceptLine';
+import { ResolutionPanel } from '@/components/ResolutionPanel';
+import { LineSocial } from '@/components/LineSocial';
+import { LineComments } from '@/components/LineComments';
 
 /** Tale-of-the-tape meta cell: tracked micro-label over a value. */
 function MetaCell({ label, children }: { label: string; children: React.ReactNode }) {
@@ -30,11 +35,13 @@ function MetaCell({ label, children }: { label: string; children: React.ReactNod
 
 export function ChallengeDetail({ id }: { id: string }) {
   const qc = useQueryClient();
+  const { publicKey } = useWallet();
+  const wallet = publicKey?.toBase58();
   const queryKey = ['challenge', id] as const;
 
   const { data, isLoading, isError, error, refetch } = useQuery<ChallengeDetailType>({
     queryKey,
-    queryFn: () => api.getChallenge(id),
+    queryFn: () => api.getChallenge(id, wallet),
   });
 
   // Live hype/odds updates merged into the cached challenge.
@@ -127,6 +134,14 @@ export function ChallengeDetail({ id }: { id: string }) {
             <Tag tone={c.outcome === 'yes' ? 'yes' : 'no'} solid className="shrink-0">
               Settled {c.outcome ?? ''}
             </Tag>
+          ) : c.status === 'refunded' ? (
+            <Tag tone="muted" solid className="shrink-0">Refunded</Tag>
+          ) : c.status === 'pending_accept' ? (
+            <Tag tone="accent" className="shrink-0">Pending acceptance</Tag>
+          ) : c.status === 'under_review' ? (
+            <Tag tone="ink" solid className="shrink-0">Under review</Tag>
+          ) : c.status === 'disputed' ? (
+            <Tag tone="accent" solid className="shrink-0">Disputed</Tag>
           ) : (
             <span className="inline-flex items-center gap-1.5 shrink-0">
               <span className="live-tick" />
@@ -137,9 +152,18 @@ export function ChallengeDetail({ id }: { id: string }) {
 
         {/* Tale of the tape */}
         <div className="flex flex-wrap divide-x divide-line border-t border-line mt-5 pt-4">
-          <MetaCell label="Creator">
-            <span className="num">{shortWallet(c.creatorWallet)}</span>
+          <MetaCell label="Influencer">
+            <Link href={`/u/${c.creatorWallet}`} className="num hover:text-accent">
+              {shortWallet(c.creatorWallet)}
+            </Link>
           </MetaCell>
+          {c.challengerWallet && (
+            <MetaCell label="Challenger">
+              <Link href={`/u/${c.challengerWallet}`} className="num hover:text-accent">
+                {shortWallet(c.challengerWallet)}
+              </Link>
+            </MetaCell>
+          )}
           <MetaCell label="Opened">
             <span className="num">{formatDate(c.startDate)}</span>
           </MetaCell>
@@ -160,16 +184,22 @@ export function ChallengeDetail({ id }: { id: string }) {
           <div className="label text-ink">Winning Condition</div>
           <p className="text-sm text-ink-2 mt-2">{c.successCriteria}</p>
         </aside>
+
+        {/* Like + share */}
+        <LineSocial challenge={c} />
       </header>
 
       {/* Two-column body */}
       <div className="grid lg:grid-cols-[1fr_22rem] gap-8 mt-8 items-start">
         {/* LEFT */}
         <div className="space-y-8">
+          <AcceptLine challenge={c} />
+          <ResolutionPanel challenge={c} />
           <HypeMeter hypeScore={c.hypeScore} streak={c.streak} misses={c.misses} />
           <ProgressChart metrics={c.metrics} unit={c.metricUnit} />
           <PhotoUpload challenge={c} />
           <PhotoGallery photos={c.photos} />
+          <LineComments challengeId={id} comments={c.comments} />
         </div>
 
         {/* RIGHT — market panel */}

@@ -13,6 +13,7 @@ import type {
   PortfolioPosition,
   FeedPost,
   Profile,
+  FollowResult,
   LikeResult,
   CreateUserBody,
   CreateChallengeBody,
@@ -45,24 +46,37 @@ export const api = {
   updateProfile: (body: CreateUserBody) => request<User>('/users', { method: 'POST', body: JSON.stringify(body) }),
   searchUsers: (q: string) => request<User[]>(`/users/search?q=${encodeURIComponent(q)}`),
   getUser: (wallet: string) => request<User>(`/users/${wallet}`),
+  toggleFollow: (wallet: string, follower: string) =>
+    request<FollowResult>(`/users/${wallet}/follow`, { method: 'POST', body: JSON.stringify({ follower }) }),
+  getFollowing: (wallet: string) => request<string[]>(`/users/${wallet}/following`),
   getPositions: (wallet: string) => request<PortfolioPosition[]>(`/users/${wallet}/positions`),
   getProfile: (wallet: string, viewer?: string) =>
     request<Profile>(`/users/${wallet}/profile${viewer ? `?viewer=${viewer}` : ''}`),
 
-  // social feed
+  // social feed + discovery
   getFeed: (wallet?: string) => request<FeedPost[]>(`/feed${wallet ? `?wallet=${wallet}` : ''}`),
+  getRankedLines: (wallet?: string) => request<Challenge[]>(`/lines${wallet ? `?wallet=${wallet}` : ''}`),
   toggleLike: (photoId: string, wallet: string) =>
     request<LikeResult>(`/photos/${photoId}/like`, { method: 'POST', body: JSON.stringify({ wallet }) }),
+  likeLine: (id: string, wallet: string) =>
+    request<Challenge>(`/challenges/${id}/like`, { method: 'POST', body: JSON.stringify({ wallet }) }),
 
   // challenges
   listChallenges: () => request<Challenge[]>('/challenges'),
   createChallenge: (body: CreateChallengeBody) =>
     request<Challenge>('/challenges', { method: 'POST', body: JSON.stringify(body) }),
-  getChallenge: (id: string) => request<ChallengeDetail>(`/challenges/${id}`),
+  getChallenge: (id: string, viewer?: string) =>
+    request<ChallengeDetail>(`/challenges/${id}${viewer ? `?viewer=${viewer}` : ''}`),
+  acceptLine: (id: string, influencerWallet: string) =>
+    request<Challenge>(`/challenges/${id}/accept`, { method: 'POST', body: JSON.stringify({ influencerWallet }) }),
+  declineLine: (id: string, influencerWallet: string) =>
+    request<Challenge>(`/challenges/${id}/decline`, { method: 'POST', body: JSON.stringify({ influencerWallet }) }),
   attachMarket: (id: string, body: AttachMarketBody) =>
     request<Challenge>(`/challenges/${id}/market`, { method: 'POST', body: JSON.stringify(body) }),
   resolveChallenge: (id: string, body: ResolveChallengeBody = {}) =>
     request<ResolveChallengeResponse>(`/challenges/${id}/resolve`, { method: 'POST', body: JSON.stringify(body) }),
+  disputeLine: (id: string, wallet: string, reason?: string) =>
+    request<Challenge>(`/challenges/${id}/dispute`, { method: 'POST', body: JSON.stringify({ wallet, reason }) }),
   getOdds: (id: string) => request<Odds>(`/challenges/${id}/odds`),
 
   // photos

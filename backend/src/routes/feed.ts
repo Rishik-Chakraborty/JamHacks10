@@ -15,6 +15,9 @@ import { PhotoModel, photoToDTO, type PhotoDoc } from '../models/Photo';
 import { ChallengeModel, challengeToDTO } from '../models/Challenge';
 import { UserModel, userToDTO } from '../models/User';
 import { CommentModel } from '../models/Comment';
+import { FollowModel, isFollowing } from '../models/Follow';
+import { enrichUser } from './users';
+import { computeSettlement } from '../services/payouts';
 import { validateBody, asyncHandler } from '../middleware/validate';
 import { HttpError } from '../middleware/error';
 
@@ -79,7 +82,22 @@ feedRouter.get(
     const skip = Number(req.query.skip) || 0;
 
     const photos = await PhotoModel.find({}).sort({ createdAt: -1 }).skip(skip).limit(limit);
-    res.json(await buildFeedPosts(photos, viewer));
+    let posts = await buildFeedPosts(photos, viewer);
+
+    // Follow-weighted ranking: posts from creators you follow float to the top,
+    // recency-ordered within each group.
+    if (viewer) {
+      const f = await FollowModel.find({ follower: viewer }).select('following').lean();
+      const following = new Set(f.map((x) => x.following));
+      posts = posts.sort((a, b) => {
+        const fa = following.has(a.challenge.creatorWallet) ? 1 : 0;
+        const fb = following.has(b.challenge.creatorWallet) ? 1 : 0;
+        if (fa !== fb) return fb - fa;
+        return new Date(b.photo.capturedAt).getTime() - new Date(a.photo.capturedAt).getTime();
+      });
+    }
+
+    res.json(posts);
   }),
 );
 
@@ -129,11 +147,19 @@ profileRouter.get(
         ? await PhotoModel.find({ challengeId: { $in: challengeIds } }).sort({ createdAt: -1 })
         : [];
 
+    // Creator-program earnings = sum of the influencer's cut across resolved lines.
+    const challengeDtos = challenges.map(challengeToDTO);
+    const creatorEarningsLamports = challengeDtos
+      .filter((c) => c.status === 'resolved')
+      .reduce((sum, c) => sum + (computeSettlement(c)?.creatorPayoutLamports ?? 0), 0);
+
     const profile: Profile = {
       wallet,
-      user: user ? userToDTO(user) : null,
-      challenges: challenges.map(challengeToDTO),
+      user: user ? await enrichUser(user) : null,
+      challenges: challengeDtos,
       posts: await buildFeedPosts(photos, viewer),
+      isFollowedByViewer: viewer ? await isFollowing(viewer, wallet) : false,
+      creatorEarningsLamports,
     };
     res.json(profile);
   }),

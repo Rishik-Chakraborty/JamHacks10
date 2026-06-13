@@ -12,6 +12,8 @@ import { Types } from 'mongoose';
 import { z } from 'zod';
 import type {
   CreateChallengeBody,
+  AcceptLineBody,
+  DeclineLineBody,
   AttachMarketBody,
   ResolveChallengeBody,
   ResolveChallengeResponse,
@@ -20,9 +22,18 @@ import type {
   GoalReview,
   ApiError,
 } from '../contract';
+import {
+  BET_LOCK_HOURS,
+  ACCEPT_WINDOW_HOURS,
+  DEFAULT_CREATOR_FEE_BPS,
+  DEFAULT_PLATFORM_FEE_BPS,
+} from '../contract';
 import { env } from '../config/env';
 import { reviewGoal } from '../services/ai';
+import { disputeChallenge } from '../services/resolve';
+import { computeSettlement } from '../services/payouts';
 import { ChallengeModel, challengeToDTO } from '../models/Challenge';
+import { UserModel } from '../models/User';
 import { PhotoModel, photoToDTO } from '../models/Photo';
 import { MetricModel, metricToDTO } from '../models/Metric';
 import { BetModel, betToDTO } from '../models/Bet';
@@ -60,14 +71,21 @@ function assertObjectId(id: string): Types.ObjectId {
 }
 
 const createChallengeSchema: z.ZodType<CreateChallengeBody> = z.object({
-  creatorWallet: z.string().min(1),
+  challengerWallet: z.string().min(1),
+  influencerWallet: z.string().min(1),
   title: z.string().min(1),
   goalText: z.string().min(1),
   successCriteria: z.string().min(1),
   metricUnit: z.string().max(16).optional(),
   templateId: z.string().max(64).optional(),
   deadline: z.string().datetime(),
+  seedSide: z.enum(['yes', 'no']),
+  seedAmountLamports: z.number().int().positive(),
 });
+
+const acceptLineSchema: z.ZodType<AcceptLineBody> = z.object({ influencerWallet: z.string().min(1) });
+const declineLineSchema: z.ZodType<DeclineLineBody> = z.object({ influencerWallet: z.string().min(1) });
+const disputeLineSchema = z.object({ wallet: z.string().min(1), reason: z.string().max(280).optional() });
 
 const attachMarketSchema: z.ZodType<AttachMarketBody> = z.object({
   marketPda: z.string().min(1),
@@ -98,6 +116,10 @@ challengesRouter.post(
   asyncHandler(async (req, res) => {
     const body = req.body as CreateChallengeBody;
 
+    if (body.challengerWallet === body.influencerWallet) {
+      throw new HttpError(400, "You can't challenge yourself — pick an influencer to challenge.");
+    }
+
     let successCriteria = body.successCriteria;
     const isCustom = !body.templateId;
 
@@ -127,27 +149,111 @@ challengesRouter.post(
       if (review?.improvedCriteria) successCriteria = review.improvedCriteria;
     }
 
+    const deadline = new Date(body.deadline);
+    const now = new Date();
+    const betLockAt = new Date(deadline.getTime() - BET_LOCK_HOURS * 3_600_000);
+    const acceptDeadline = new Date(now.getTime() + ACCEPT_WINDOW_HOURS * 3_600_000);
+
+    const seedYes = body.seedSide === 'yes' ? body.seedAmountLamports : 0;
+    const seedNo = body.seedSide === 'no' ? body.seedAmountLamports : 0;
+    const total = seedYes + seedNo;
+
     const doc = await ChallengeModel.create({
-      creatorWallet: body.creatorWallet,
+      creatorWallet: body.influencerWallet, // the influencer is the subject of the line
+      challengerWallet: body.challengerWallet,
       title: body.title,
       goalText: body.goalText,
       successCriteria,
       metricUnit: body.metricUnit,
       templateId: body.templateId,
-      startDate: new Date(),
-      deadline: new Date(body.deadline),
-      status: 'active',
+      startDate: now,
+      deadline,
+      status: 'pending_accept',
+      acceptDeadline,
+      betLockAt,
+      creatorFeeBps: DEFAULT_CREATOR_FEE_BPS,
+      platformFeeBps: DEFAULT_PLATFORM_FEE_BPS,
       outcome: null,
+      yesPoolLamports: seedYes,
+      noPoolLamports: seedNo,
+      impliedYes: total > 0 ? seedYes / total : 0.5,
+      hypeScore: 1,
     });
+
+    // Record the challenger's seed bet (web2 mirror — the on-chain seed lands with
+    // the Anchor redeploy). The synthetic tx id satisfies the unique txSig index.
+    await BetModel.create({
+      challengeId: doc._id,
+      bettorWallet: body.challengerWallet,
+      side: body.seedSide,
+      amountLamports: body.seedAmountLamports,
+      txSig: `seed_${doc._id.toString()}`,
+      positionPda: `seedpos_${doc._id.toString()}`,
+      claimed: false,
+    });
+
     res.status(201).json(challengeToDTO(doc));
   }),
 );
 
-// GET /api/challenges/:id → ChallengeDetail
+// POST /api/challenges/:id/accept — the challenged influencer accepts; line opens for betting.
+challengesRouter.post(
+  '/:id/accept',
+  validateBody(acceptLineSchema),
+  asyncHandler(async (req, res) => {
+    const _id = assertObjectId(req.params.id);
+    const { influencerWallet } = req.body as AcceptLineBody;
+    const challenge = await ChallengeModel.findById(_id);
+    if (!challenge) throw new HttpError(404, 'Line not found');
+    if (challenge.creatorWallet !== influencerWallet) {
+      throw new HttpError(403, 'Only the challenged influencer can accept this line');
+    }
+    if (challenge.status !== 'pending_accept') {
+      throw new HttpError(409, `Line is not awaiting acceptance (status: ${challenge.status})`);
+    }
+    if (challenge.acceptDeadline && challenge.acceptDeadline.getTime() < Date.now()) {
+      challenge.status = 'refunded';
+      await challenge.save();
+      throw new HttpError(410, 'The accept window has passed — this line was refunded');
+    }
+
+    challenge.status = 'active';
+    await challenge.save();
+    // Accepting a line opts the influencer into creator mode.
+    await UserModel.updateOne({ wallet: influencerWallet }, { $set: { isCreator: true } });
+
+    res.json(challengeToDTO(challenge));
+  }),
+);
+
+// POST /api/challenges/:id/decline — the influencer declines; line refunds.
+challengesRouter.post(
+  '/:id/decline',
+  validateBody(declineLineSchema),
+  asyncHandler(async (req, res) => {
+    const _id = assertObjectId(req.params.id);
+    const { influencerWallet } = req.body as DeclineLineBody;
+    const challenge = await ChallengeModel.findById(_id);
+    if (!challenge) throw new HttpError(404, 'Line not found');
+    if (challenge.creatorWallet !== influencerWallet) {
+      throw new HttpError(403, 'Only the challenged influencer can decline this line');
+    }
+    if (challenge.status !== 'pending_accept') {
+      throw new HttpError(409, `Line is not awaiting acceptance (status: ${challenge.status})`);
+    }
+
+    challenge.status = 'refunded';
+    await challenge.save();
+    res.json(challengeToDTO(challenge));
+  }),
+);
+
+// GET /api/challenges/:id?viewer=<wallet> → ChallengeDetail
 challengesRouter.get(
   '/:id',
   asyncHandler(async (req, res) => {
     const _id = assertObjectId(req.params.id);
+    const viewer = typeof req.query.viewer === 'string' ? req.query.viewer : undefined;
     const challenge = await ChallengeModel.findById(_id);
     if (!challenge) throw new HttpError(404, 'Challenge not found');
 
@@ -158,13 +264,16 @@ challengesRouter.get(
       CommentModel.find({ challengeId: _id }).sort({ createdAt: -1 }).limit(50),
     ]);
 
+    const dto = challengeToDTO(challenge);
+    dto.likedByMe = viewer ? (challenge.likes ?? []).includes(viewer) : false;
     const detail: ChallengeDetail = {
-      ...challengeToDTO(challenge),
+      ...dto,
       odds: computeOdds(challenge.yesPoolLamports, challenge.noPoolLamports),
       photos: photos.map(photoToDTO),
       metrics: metrics.map(metricToDTO),
       recentBets: recentBets.map(betToDTO),
       comments: comments.map(commentToDTO),
+      settlement: computeSettlement(dto) ?? undefined,
     };
     res.json(detail);
   }),
@@ -239,5 +348,39 @@ challengesRouter.post(
         'Resolution service not wired yet (AI oracle + Solana resolve_market are owned by other agents).',
       details: { challengeId: req.params.id, manualOutcome: body.manualOutcome ?? null },
     });
+  }),
+);
+
+// POST /api/challenges/:id/like — toggle the requesting wallet's like on a line.
+const likeLineSchema = z.object({ wallet: z.string().min(1) });
+challengesRouter.post(
+  '/:id/like',
+  validateBody(likeLineSchema),
+  asyncHandler(async (req, res) => {
+    const _id = assertObjectId(req.params.id);
+    const { wallet } = req.body as z.infer<typeof likeLineSchema>;
+    const challenge = await ChallengeModel.findById(_id);
+    if (!challenge) throw new HttpError(404, 'Line not found');
+
+    const likes = (challenge.likes ?? []) as string[];
+    const liked = likes.includes(wallet);
+    challenge.set('likes', liked ? likes.filter((w) => w !== wallet) : [...likes, wallet]);
+    await challenge.save();
+
+    res.json({ ...challengeToDTO(challenge), likedByMe: !liked });
+  }),
+);
+
+// POST /api/challenges/:id/dispute — contest the oracle verdict during the window.
+challengesRouter.post(
+  '/:id/dispute',
+  validateBody(disputeLineSchema),
+  asyncHandler(async (req, res) => {
+    const _id = assertObjectId(req.params.id);
+    const body = req.body as z.infer<typeof disputeLineSchema>;
+    await disputeChallenge(req.params.id, body.wallet, body.reason);
+    const challenge = await ChallengeModel.findById(_id);
+    if (!challenge) throw new HttpError(404, 'Line not found');
+    res.json(challengeToDTO(challenge));
   }),
 );

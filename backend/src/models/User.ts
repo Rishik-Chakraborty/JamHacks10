@@ -11,6 +11,10 @@ const userSchema = new Schema(
     username: { type: String, required: true },
     avatar: { type: String },
     bio: { type: String },
+    /** Opted into creator mode (set when they accept their first line). */
+    isCreator: { type: Boolean, default: false },
+    /** Reputation: count of accepted lines the influencer no-showed. */
+    noShows: { type: Number, default: 0 },
   },
   { timestamps: { createdAt: true, updatedAt: false }, collection: 'users' },
 );
@@ -26,6 +30,8 @@ export function userToDTO(doc: HydratedDocument<UserDoc>): User {
     username: doc.username,
     avatar: doc.avatar ?? undefined,
     bio: doc.bio ?? undefined,
+    isCreator: doc.isCreator ?? false,
+    noShows: doc.noShows ?? 0,
     createdAt: (doc.get('createdAt') as Date).toISOString(),
   };
 }

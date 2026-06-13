@@ -1,21 +1,24 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
+import { useQuery } from '@tanstack/react-query';
 import { useWallet, useConnection, useAnchorWallet } from '@solana/wallet-adapter-react';
 import { api } from '@/lib/api';
 import { shortWallet } from '@/lib/format';
 import {
   CHALLENGE_TEMPLATES,
+  LAMPORTS_PER_SOL,
   type ChallengeTemplate,
   type CreateChallengeBody,
+  type BetSide,
+  type User,
 } from '@/types/contract';
 import { Button } from '@/components/ui/Button';
 import { Panel } from '@/components/ui/Panel';
 import { Tag } from '@/components/ui/Tag';
 
-// Wallet button is browser-only — load client-side to avoid hydration mismatch.
 const WalletMultiButton = dynamic(
   () => import('@solana/wallet-adapter-react-ui').then((m) => m.WalletMultiButton),
   { ssr: false, loading: () => <span className="label">connect…</span> },
@@ -23,24 +26,17 @@ const WalletMultiButton = dynamic(
 
 const CUSTOM = 'custom' as const;
 
-/** Substitute the single `{value}` placeholder. Falls back to a dash when empty. */
 function fill(template: string, value: string): string {
   return template.replace(/\{value\}/g, value.trim() === '' ? '—' : value.trim());
 }
-
-/** Local datetime-local string -> ISO. */
 function toIso(localDatetime: string): string {
   return new Date(localDatetime).toISOString();
 }
-
-/** Min for the datetime-local input: ~5 min out, formatted as local YYYY-MM-DDTHH:mm. */
 function minDatetimeLocal(): string {
   const d = new Date(Date.now() + 5 * 60_000);
   const off = d.getTimezoneOffset() * 60_000;
   return new Date(d.getTime() - off).toISOString().slice(0, 16);
 }
-
-/** FNV-1a (32-bit) hash -> 8 hex chars. Deterministic, <=32-byte slug with 'gc' prefix. */
 function slugFromId(id: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < id.length; i++) {
@@ -49,6 +45,10 @@ function slugFromId(id: string): string {
   }
   return 'gc' + (h >>> 0).toString(16).padStart(8, '0');
 }
+/** Loose base58 wallet check so a pasted address can be used directly. */
+function looksLikeWallet(s: string): boolean {
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s.trim());
+}
 
 export function CreateChallengeForm() {
   const router = useRouter();
@@ -56,20 +56,27 @@ export function CreateChallengeForm() {
   const { connection } = useConnection();
   const anchorWallet = useAnchorWallet();
 
+  // Influencer picker
+  const [infQuery, setInfQuery] = useState('');
+  const [infDebounced, setInfDebounced] = useState('');
+  const [influencer, setInfluencer] = useState<{ wallet: string; username: string } | null>(null);
+
+  // Goal
   const [mode, setMode] = useState<string>(CHALLENGE_TEMPLATES[0]?.id ?? CUSTOM);
   const [value, setValue] = useState('');
   const [deadline, setDeadline] = useState('');
-
-  // Custom-goal fields
   const [title, setTitle] = useState('');
   const [goalText, setGoalText] = useState('');
   const [successCriteria, setSuccessCriteria] = useState('');
   const [unit, setUnit] = useState('');
 
+  // Seed bet
+  const [seedSide, setSeedSide] = useState<BetSide>('no');
+  const [seedAmount, setSeedAmount] = useState('');
+
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
-  const [marketNote, setMarketNote] = useState<string | null>(null);
 
   const wallet = publicKey?.toBase58() ?? null;
   const isCustom = mode === CUSTOM;
@@ -78,17 +85,27 @@ export function CreateChallengeForm() {
     [mode],
   );
 
-  /* ---- Wallet gate ---------------------------------------------------- */
+  useEffect(() => {
+    const id = setTimeout(() => setInfDebounced(infQuery.trim()), 250);
+    return () => clearTimeout(id);
+  }, [infQuery]);
+
+  const { data: infResults } = useQuery<User[]>({
+    queryKey: ['userSearch', infDebounced],
+    queryFn: () => api.searchUsers(infDebounced),
+    enabled: infDebounced.length >= 1 && !influencer,
+    staleTime: 10_000,
+  });
+
   if (!wallet) {
     return (
       <div className="grid lg:grid-cols-12 gap-8 lg:gap-10">
         <div className="lg:col-span-8">
           <Panel className="p-8">
             <p className="label">Step One</p>
-            <h2 className="display text-3xl text-ink mt-2">Connect a wallet to open a line</h2>
+            <h2 className="display text-3xl text-ink mt-2">Connect a wallet to start a line</h2>
             <p className="text-sm text-ink-2 mt-2 max-w-md">
-              Your connected wallet signs the market into existence and is recorded as the athlete on
-              the card. Connect to continue.
+              You&rsquo;re the challenger — you propose the goal and seed the first bet. Connect to continue.
             </p>
             <div className="mt-5">
               <WalletMultiButton />
@@ -100,24 +117,27 @@ export function CreateChallengeForm() {
     );
   }
 
-  // Derived preview for template mode.
   const previewTitle = template ? fill(template.titleTemplate, value) : '';
   const previewGoal = template ? fill(template.goalTemplate, value) : '';
   const previewCriteria = template ? fill(template.criteriaTemplate, value) : '';
 
   function validate(): string | null {
+    if (!influencer) return 'Pick the influencer you want to challenge.';
+    if (influencer.wallet === wallet) return "You can't challenge yourself.";
     if (!deadline) return 'Set a deadline.';
     if (new Date(deadline).getTime() <= Date.now()) return 'The deadline must be in the future.';
     if (isCustom) {
       if (title.trim().length < 4) return 'Give it a punchy title (4+ chars).';
       if (goalText.trim().length < 10) return 'Describe the goal in a sentence (10+ chars).';
-      if (successCriteria.trim().length < 10) return 'Spell out exactly how the judge decides (10+ chars).';
+      if (successCriteria.trim().length < 10) return 'Spell out how the judge decides (10+ chars).';
     } else if (template?.valuePrompt) {
       const n = Number(value);
       if (value.trim() === '' || !Number.isFinite(n) || n <= 0) {
         return `Enter a valid ${template.valuePrompt.toLowerCase()}.`;
       }
     }
+    const seed = Number(seedAmount);
+    if (!Number.isFinite(seed) || seed <= 0) return 'Seed your line with a SOL bet.';
     return null;
   }
 
@@ -125,7 +145,6 @@ export function CreateChallengeForm() {
     e.preventDefault();
     setSubmitError(null);
     setReviewError(null);
-    setMarketNote(null);
 
     const problem = validate();
     if (problem) {
@@ -133,23 +152,30 @@ export function CreateChallengeForm() {
       return;
     }
 
+    const seedLamports = Math.round(Number(seedAmount) * LAMPORTS_PER_SOL);
     const body: CreateChallengeBody = isCustom
       ? {
-          creatorWallet: wallet!,
+          challengerWallet: wallet!,
+          influencerWallet: influencer!.wallet,
           title: title.trim(),
           goalText: goalText.trim(),
           successCriteria: successCriteria.trim(),
           metricUnit: unit.trim() === '' ? undefined : unit.trim(),
           deadline: toIso(deadline),
+          seedSide,
+          seedAmountLamports: seedLamports,
         }
       : {
-          creatorWallet: wallet!,
+          challengerWallet: wallet!,
+          influencerWallet: influencer!.wallet,
           title: previewTitle,
           goalText: previewGoal,
           successCriteria: previewCriteria,
           metricUnit: template?.unit,
           templateId: template!.id,
           deadline: toIso(deadline),
+          seedSide,
+          seedAmountLamports: seedLamports,
         };
 
     setSubmitting(true);
@@ -158,8 +184,6 @@ export function CreateChallengeForm() {
       try {
         challenge = await api.createChallenge(body);
       } catch (err) {
-        // A custom goal can be rejected by the AI reviewer (HTTP 422) — surface
-        // its feedback distinctly so the user knows what to fix.
         if (isCustom) {
           setReviewError(err instanceof Error ? err.message : 'This goal wasn’t accepted — make it more specific and checkable.');
           setSubmitting(false);
@@ -168,10 +192,9 @@ export function CreateChallengeForm() {
         throw err;
       }
 
-      // Best-effort: register the creator as a user. Never blocks the flow.
       await api.createUser({ wallet: wallet!, username: shortWallet(wallet!) }).catch(() => {});
 
-      // On-chain market init — degrade gracefully if not deployed/connected.
+      // Best-effort on-chain market init (challenger signs). Degrades gracefully.
       const programId = process.env.NEXT_PUBLIC_PROGRAM_ID;
       const authority = process.env.NEXT_PUBLIC_ORACLE_AUTHORITY;
       if (programId && authority && anchorWallet) {
@@ -187,15 +210,13 @@ export function CreateChallengeForm() {
           });
           await api.attachMarket(challenge.id, { marketPda, vaultPda, programId });
         } catch {
-          setMarketNote('market step skipped — betting opens once deployed');
+          /* market step is best-effort */
         }
-      } else {
-        setMarketNote('market step skipped — betting opens once deployed');
       }
 
       router.push(`/challenge/${challenge.id}`);
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Could not open the line. Try again.');
+      setSubmitError(err instanceof Error ? err.message : 'Could not create the line. Try again.');
       setSubmitting(false);
     }
   }
@@ -205,48 +226,91 @@ export function CreateChallengeForm() {
       <form className="lg:col-span-8" onSubmit={onSubmit} noValidate>
         <Panel className="p-6 sm:p-8">
           <div className="flex items-center justify-between">
-            <p className="label">The Terms</p>
-            <Tag tone="muted">Athlete · {shortWallet(wallet)}</Tag>
+            <p className="label">The Challenge</p>
+            <Tag tone="muted">Challenger · {shortWallet(wallet)}</Tag>
           </div>
 
-          {/* Goal type dropdown */}
+          {/* Influencer picker */}
           <div className="mt-6">
-            <label htmlFor="goalType" className="label block">
-              Goal
-            </label>
-            <p className="text-xs text-faint mt-0.5">
-              Pick a ready-made, judge-verifiable goal — or write your own.
-            </p>
+            <label className="label block">Challenge an influencer</label>
+            <p className="text-xs text-faint mt-0.5">Search by name, or paste their wallet address.</p>
+            {influencer ? (
+              <div className="mt-1.5 flex items-center gap-3 border border-ink bg-paper-2 px-3 h-11">
+                <span className="num text-sm text-ink truncate">{influencer.username}</span>
+                <span className="num text-xs text-muted truncate">{shortWallet(influencer.wallet)}</span>
+                <button
+                  type="button"
+                  onClick={() => { setInfluencer(null); setInfQuery(''); }}
+                  className="label tracking-normal underline hover:text-accent ml-auto"
+                >
+                  Change
+                </button>
+              </div>
+            ) : (
+              <div className="relative">
+                <input
+                  type="text"
+                  value={infQuery}
+                  onChange={(e) => setInfQuery(e.target.value)}
+                  placeholder="@username or wallet address"
+                  className="w-full bg-paper border border-line focus:border-ink outline-none px-3 h-11 mt-1.5 text-ink placeholder:text-faint"
+                />
+                {infDebounced.length >= 1 && (
+                  <div className="absolute z-30 left-0 right-0 mt-1 max-h-72 overflow-auto bg-paper border border-ink shadow-[3px_3px_0_0_#17150f]">
+                    {(infResults ?? []).map((u) => (
+                      <button
+                        key={u.wallet}
+                        type="button"
+                        onClick={() => setInfluencer({ wallet: u.wallet, username: u.username })}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-paper-2 text-left border-b border-line last:border-0"
+                      >
+                        <span className="display-tight text-sm text-ink truncate">{u.username}</span>
+                        <span className="num text-xs text-muted ml-auto">{shortWallet(u.wallet)}</span>
+                      </button>
+                    ))}
+                    {looksLikeWallet(infDebounced) && (
+                      <button
+                        type="button"
+                        onClick={() => setInfluencer({ wallet: infDebounced.trim(), username: shortWallet(infDebounced.trim()) })}
+                        className="w-full px-3 py-2.5 text-left hover:bg-paper-2 label tracking-normal text-ink"
+                      >
+                        Use wallet {shortWallet(infDebounced.trim())}
+                      </button>
+                    )}
+                    {(infResults?.length ?? 0) === 0 && !looksLikeWallet(infDebounced) && (
+                      <p className="px-3 py-2.5 label tracking-normal text-muted">No athletes found.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Goal dropdown */}
+          <div className="mt-6">
+            <label htmlFor="goalType" className="label block">The goal</label>
+            <p className="text-xs text-faint mt-0.5">Pick a ready-made, judge-verifiable goal — or write your own.</p>
             <select
               id="goalType"
               value={mode}
-              onChange={(e) => {
-                setMode(e.target.value);
-                setSubmitError(null);
-                setReviewError(null);
-              }}
+              onChange={(e) => { setMode(e.target.value); setSubmitError(null); setReviewError(null); }}
               disabled={submitting}
               className="w-full bg-paper border border-line focus:border-ink outline-none px-3 h-11 mt-1.5 text-ink font-display uppercase tracking-wide text-sm"
             >
               <option value={CUSTOM}>✦ Write your own goal</option>
               <optgroup label="Pre-made goals">
                 {CHALLENGE_TEMPLATES.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.label}
-                  </option>
+                  <option key={t.id} value={t.id}>{t.label}</option>
                 ))}
               </optgroup>
             </select>
           </div>
 
-          {/* ---- Template mode -------------------------------------------- */}
           {!isCustom && template && (
             <div className="mt-5 space-y-5">
               {template.valuePrompt && (
                 <div>
-                  <label htmlFor="value" className="label block">
-                    {template.valuePrompt}
-                  </label>
+                  <label htmlFor="value" className="label block">{template.valuePrompt}</label>
                   <input
                     id="value"
                     type="number"
@@ -255,39 +319,25 @@ export function CreateChallengeForm() {
                     min="0"
                     value={value}
                     onChange={(e) => setValue(e.target.value)}
-                    placeholder="e.g. 140"
+                    placeholder="e.g. 30"
                     className="num w-full bg-paper border border-line focus:border-ink outline-none px-3 h-11 mt-1.5 text-ink placeholder:text-faint"
                   />
                 </div>
               )}
-
-              {/* Auto-built preview */}
               <div className="rule-ink pt-4">
                 <p className="label text-ink">Preview</p>
                 <h3 className="display text-2xl text-ink mt-1.5">{previewTitle}</h3>
                 <p className="text-sm text-ink-2 mt-1.5">{previewGoal}</p>
                 <div className="border border-ink bg-paper-2 p-3 mt-3">
-                  <div className="label text-ink">Winning condition (the AI judge reads this)</div>
+                  <div className="label text-ink">Winning condition (the judge reads this)</div>
                   <p className="text-sm text-ink-2 mt-1.5">{previewCriteria}</p>
                 </div>
-                <p className="text-xs text-faint mt-2">
-                  Pre-made goals are pre-approved — no review needed.
-                </p>
               </div>
             </div>
           )}
 
-          {/* ---- Custom mode ---------------------------------------------- */}
           {isCustom && (
             <div className="mt-5 space-y-5">
-              <div className="border border-accent bg-card px-3 py-2">
-                <span className="label text-accent">Custom goal</span>
-                <p className="text-xs text-ink-2 mt-0.5">
-                  Make it specific and checkable from a photo or video. Vague or subjective goals get
-                  sent back with notes on what to fix.
-                </p>
-              </div>
-
               <div>
                 <label htmlFor="title" className="label block">Title</label>
                 <input
@@ -295,26 +345,23 @@ export function CreateChallengeForm() {
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Drop to sub-12% body fat by August"
+                  placeholder="Hold a 60-second freestanding handstand"
                   className="w-full bg-paper border border-line focus:border-ink outline-none px-3 h-11 mt-1.5 text-ink placeholder:text-faint"
                 />
               </div>
-
               <div>
-                <label htmlFor="goalText" className="label block">The Goal</label>
-                <p className="text-xs text-faint mt-0.5">Plain-language pitch shown on the card.</p>
+                <label htmlFor="goalText" className="label block">The goal</label>
                 <textarea
                   id="goalText"
                   rows={3}
                   value={goalText}
                   onChange={(e) => setGoalText(e.target.value)}
-                  placeholder="Cut to single-digit body fat in eight weeks, training six days a week."
+                  placeholder="Plain-language description of what they have to pull off."
                   className="w-full bg-paper border border-line focus:border-ink outline-none px-3 py-2 mt-1.5 text-ink placeholder:text-faint resize-y"
                 />
               </div>
-
               <div className="rule-ink pt-4">
-                <label htmlFor="successCriteria" className="label block text-ink">Success Criteria</label>
+                <label htmlFor="successCriteria" className="label block text-ink">Success criteria</label>
                 <p className="text-xs text-accent mt-0.5 font-semibold">
                   Be precise and checkable from a photo/video — the judge reads THIS at the deadline.
                 </p>
@@ -323,20 +370,18 @@ export function CreateChallengeForm() {
                   rows={3}
                   value={successCriteria}
                   onChange={(e) => setSuccessCriteria(e.target.value)}
-                  placeholder="Final photo shows a scale reading 175 lb or less with the number legible."
+                  placeholder="A single continuous video shows… (be specific about what must be visible)."
                   className="w-full bg-paper border border-line focus:border-ink outline-none px-3 py-2 mt-1.5 text-ink placeholder:text-faint resize-y"
                 />
               </div>
-
               <div>
                 <label htmlFor="unit" className="label block">Metric unit <span className="text-faint normal-case">(optional)</span></label>
-                <p className="text-xs text-faint mt-0.5">Unit for the progress chart, e.g. kg, reps, %.</p>
                 <input
                   id="unit"
                   type="text"
                   value={unit}
                   onChange={(e) => setUnit(e.target.value)}
-                  placeholder="kg"
+                  placeholder="reps"
                   maxLength={16}
                   className="w-40 bg-paper border border-line focus:border-ink outline-none px-3 h-11 mt-1.5 text-ink placeholder:text-faint"
                 />
@@ -355,6 +400,48 @@ export function CreateChallengeForm() {
               onChange={(e) => setDeadline(e.target.value)}
               className="num w-full sm:w-72 bg-paper border border-line focus:border-ink outline-none px-3 h-11 mt-1.5 text-ink"
             />
+            <p className="text-xs text-faint mt-1.5">Bets lock 12h before this.</p>
+          </div>
+
+          {/* Seed bet */}
+          <div className="mt-6 rule-ink pt-4">
+            <p className="label text-ink">Seed the line — your call</p>
+            <p className="text-xs text-faint mt-0.5">Back YES (they&rsquo;ll do it) or NO (they won&rsquo;t). This opens the pool.</p>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              <button
+                type="button"
+                aria-pressed={seedSide === 'yes'}
+                onClick={() => setSeedSide('yes')}
+                className={`inline-flex items-center justify-center h-10 px-4 font-display uppercase tracking-wide font-semibold border transition-colors duration-150 ${
+                  seedSide === 'yes' ? 'bg-yes text-paper border-yes' : 'bg-transparent text-yes border-yes hover:bg-yes-soft'
+                }`}
+              >
+                Yes
+              </button>
+              <button
+                type="button"
+                aria-pressed={seedSide === 'no'}
+                onClick={() => setSeedSide('no')}
+                className={`inline-flex items-center justify-center h-10 px-4 font-display uppercase tracking-wide font-semibold border transition-colors duration-150 ${
+                  seedSide === 'no' ? 'bg-no text-paper border-no' : 'bg-transparent text-no border-no hover:bg-no-soft'
+                }`}
+              >
+                No
+              </button>
+            </div>
+            <div className="flex items-center border border-ink mt-2 bg-card w-full sm:w-60">
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                value={seedAmount}
+                onChange={(e) => setSeedAmount(e.target.value)}
+                placeholder="0.00"
+                className="num flex-1 bg-transparent px-3 h-10 text-ink outline-none placeholder:text-faint"
+              />
+              <span className="num text-sm text-muted px-3 border-l border-line">SOL</span>
+            </div>
           </div>
 
           {/* Submit + states */}
@@ -370,23 +457,12 @@ export function CreateChallengeForm() {
                 <p className="text-sm text-no">{submitError}</p>
               </div>
             ) : null}
-            {marketNote ? (
-              <div className="border border-line bg-paper-2 px-3 py-2 mb-4">
-                <p className="text-xs text-muted">{marketNote}</p>
-              </div>
-            ) : null}
             <div className="flex items-center gap-4">
               <Button type="submit" variant="accent" size="lg" disabled={submitting}>
-                {submitting
-                  ? isCustom
-                    ? 'Checking…'
-                    : 'Opening…'
-                  : isCustom
-                    ? 'Submit goal'
-                    : 'Open the line'}
+                {submitting ? 'Sending challenge…' : 'Send challenge'}
               </Button>
               <p className="label tracking-normal">
-                {submitting ? 'Signing & posting' : 'Posts to the board'}
+                {submitting ? 'Opening the line' : 'They must accept to make it live'}
               </p>
             </div>
           </div>
@@ -398,15 +474,12 @@ export function CreateChallengeForm() {
   );
 }
 
-/* --------------------------------------------------------------------------
- * Right column — "How it works" aside.
- * ----------------------------------------------------------------------- */
 function HowItWorks() {
   const steps: { n: string; head: string; body: string }[] = [
-    { n: '01', head: 'Pick or write a goal', body: 'Choose a ready-made goal, or write your own to put on the board.' },
-    { n: '02', head: 'Sign the market', body: 'Your wallet opens a parimutuel pool keyed to this line.' },
-    { n: '03', head: 'The board reacts', body: 'Spectators stake SOL on YES or NO. Odds move live.' },
-    { n: '04', head: 'The bell rings', body: 'At the deadline an AI judge reads your photo/video proof. Winners split the pot.' },
+    { n: '01', head: 'Challenge an influencer', body: 'Pick who, set the goal & deadline, and seed the first bet (YES or NO).' },
+    { n: '02', head: 'They accept', body: 'The line goes live only once the influencer accepts the challenge.' },
+    { n: '03', head: 'The board bets', body: 'Spectators stake SOL on YES or NO. Bets lock 12h before the deadline.' },
+    { n: '04', head: 'The bell rings', body: 'The influencer posts final proof; an AI judge rules. Winners split the pot.' },
   ];
   return (
     <aside className="lg:col-span-4">
@@ -426,8 +499,8 @@ function HowItWorks() {
       </div>
       <div className="rule pt-3 mt-5">
         <p className="text-xs text-faint leading-relaxed">
-          Amounts settle in SOL. The judge is read-only and reads your final proof against the
-          success criteria — write them so a stranger could rule on them.
+          The influencer never bets — they earn a cut of the pool once they&rsquo;re in the creator program.
+          That&rsquo;s what keeps the line honest.
         </p>
       </div>
     </aside>

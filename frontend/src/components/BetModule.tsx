@@ -32,19 +32,22 @@ export function BetModule({ challenge, odds }: Props) {
   const programReady = Boolean(process.env.NEXT_PUBLIC_PROGRAM_ID);
   const marketReady = Boolean(challenge.marketPda);
   const resolved = challenge.status === 'resolved';
+  const locked = challenge.betLockAt ? Date.now() >= new Date(challenge.betLockAt).getTime() : false;
+  const isInfluencer = publicKey?.toBase58() === challenge.creatorWallet;
 
-  // Graceful degradation — no chain market deployed yet.
-  if (!programReady || !marketReady) {
-    return (
-      <Panel className="p-4 mt-4">
-        <h3 className="label text-ink">Place a bet</h3>
-        <div className="rule-ink mt-1.5" />
-        <p className="text-sm text-muted mt-3">
-          Market not live yet — betting opens once the on-chain market is deployed.
-        </p>
-      </Panel>
-    );
-  }
+  // A line is only bettable while active. Other states explain why not.
+  const statusMsg =
+    challenge.status === 'pending_accept'
+      ? 'Waiting for the influencer to accept this line.'
+      : challenge.status === 'refunded'
+        ? 'This line was refunded — betting is closed.'
+        : challenge.status === 'under_review'
+          ? 'Final proof is in — under review. Betting is closed.'
+          : challenge.status === 'disputed'
+            ? 'The verdict is disputed — betting is closed.'
+            : resolved
+              ? 'This market is settled — betting is closed.'
+              : null;
 
   const sol = Number(amount);
   const validAmount = Number.isFinite(sol) && sol > 0;
@@ -91,8 +94,18 @@ export function BetModule({ challenge, odds }: Props) {
       <h3 className="label text-ink">Place a bet</h3>
       <div className="rule-ink mt-1.5" />
 
-      {resolved ? (
-        <p className="text-sm text-muted mt-3">This market is settled — betting is closed.</p>
+      {statusMsg ? (
+        <p className="text-sm text-muted mt-3">{statusMsg}</p>
+      ) : !programReady || !marketReady ? (
+        <p className="text-sm text-muted mt-3">
+          Market not live yet — betting opens once the on-chain market is deployed.
+        </p>
+      ) : locked ? (
+        <p className="text-sm text-muted mt-3">Betting is locked — within 12h of the deadline.</p>
+      ) : isInfluencer ? (
+        <p className="text-sm text-muted mt-3">
+          You&rsquo;re the influencer on this line — you can&rsquo;t bet on yourself.
+        </p>
       ) : !connected ? (
         <div className="mt-3">
           <p className="text-sm text-muted mb-2">Connect a wallet to back a side.</p>
@@ -100,24 +113,34 @@ export function BetModule({ challenge, odds }: Props) {
         </div>
       ) : (
         <div className="mt-3 space-y-4">
-          {/* Side toggle */}
+          {/* Side toggle — explicit per-state classes so the selected fill and
+              text colour never conflict (a stacked text-yes + text-paper used to
+              render green-on-green and hide the label). */}
           <div className="grid grid-cols-2 gap-2">
-            <Button
-              variant="yes"
-              size="md"
-              className={side === 'yes' ? 'bg-yes text-paper' : ''}
+            <button
+              type="button"
+              aria-pressed={side === 'yes'}
               onClick={() => setSide('yes')}
+              className={`inline-flex items-center justify-center h-10 px-4 font-display uppercase tracking-wide font-semibold border transition-colors duration-150 ${
+                side === 'yes'
+                  ? 'bg-yes text-paper border-yes'
+                  : 'bg-transparent text-yes border-yes hover:bg-yes-soft'
+              }`}
             >
               Yes
-            </Button>
-            <Button
-              variant="no"
-              size="md"
-              className={side === 'no' ? 'bg-no text-paper' : ''}
+            </button>
+            <button
+              type="button"
+              aria-pressed={side === 'no'}
               onClick={() => setSide('no')}
+              className={`inline-flex items-center justify-center h-10 px-4 font-display uppercase tracking-wide font-semibold border transition-colors duration-150 ${
+                side === 'no'
+                  ? 'bg-no text-paper border-no'
+                  : 'bg-transparent text-no border-no hover:bg-no-soft'
+              }`}
             >
               No
-            </Button>
+            </button>
           </div>
 
           {/* Amount */}

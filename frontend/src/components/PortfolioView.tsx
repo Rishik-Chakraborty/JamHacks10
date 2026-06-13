@@ -22,11 +22,12 @@ const WalletMultiButton = dynamic(
 
 const EXPLORER = (sig: string) => `https://explorer.solana.com/tx/${sig}?cluster=devnet`;
 
-type PositionStatus = 'open' | 'won' | 'lost';
+type PositionStatus = 'open' | 'won' | 'lost' | 'refunded';
 
-function statusOf(c: Challenge, b: Bet): PositionStatus {
-  if (c.status === 'active') return 'open';
-  return c.outcome === b.side ? 'won' : 'lost';
+function statusOf(c: Challenge, b: Bet, pos: PortfolioPosition): PositionStatus {
+  if (c.status === 'refunded' || pos.refunded) return 'refunded';
+  if (c.status !== 'resolved') return 'open'; // pending_accept / active / under_review / disputed
+  return (pos.won ?? c.outcome === b.side) ? 'won' : 'lost';
 }
 
 /**
@@ -127,10 +128,10 @@ function Positions({ wallet }: { wallet: string }) {
   let won = 0;
   let lost = 0;
   for (const p of data) {
-    const s = statusOf(p.challenge, p.bet);
+    const s = statusOf(p.challenge, p.bet, p);
     if (s === 'open') open += 1;
     else if (s === 'won') won += 1;
-    else lost += 1;
+    else if (s === 'lost') lost += 1;
   }
 
   return (
@@ -179,7 +180,7 @@ function Positions({ wallet }: { wallet: string }) {
 
 function PositionRow({ position }: { position: PortfolioPosition }) {
   const { challenge: c, bet: b } = position;
-  const status = statusOf(c, b);
+  const status = statusOf(c, b, position);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-12 gap-2 md:gap-4 items-center px-4 py-4 border-b border-line last:border-b-0">
@@ -212,6 +213,13 @@ function PositionRow({ position }: { position: PortfolioPosition }) {
           <OpenStatus position={position} />
         ) : status === 'won' ? (
           <WonStatus position={position} />
+        ) : status === 'refunded' ? (
+          <div className="md:flex md:flex-col md:items-end">
+            <Tag tone="muted" solid>Refunded</Tag>
+            <span className="text-xs text-muted mt-1">
+              Stake back <span className="num text-ink">{formatSol(position.payoutLamports ?? b.amountLamports)} SOL</span>
+            </span>
+          </div>
         ) : (
           <div className="inline-flex items-center md:justify-end">
             <Tag tone="no" solid>
@@ -286,6 +294,11 @@ function WonStatus({ position }: { position: PortfolioPosition }) {
         <Tag tone="yes" solid>
           Won
         </Tag>
+        {position.payoutLamports != null && (
+          <span className="text-xs text-muted">
+            Payout <span className="num text-yes">{formatSol(position.payoutLamports)} SOL</span>
+          </span>
+        )}
         {b.claimed ? (
           <span className="label tracking-normal text-yes">Claimed</span>
         ) : claimable ? (
