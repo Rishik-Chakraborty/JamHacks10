@@ -139,9 +139,17 @@ photosRouter.delete(
       throw new HttpError(403, 'You can only delete your own posts');
     }
     // A final-proof photo is the evidence the AI oracle judges and the no-show
-    // sweep checks — deleting it would strand resolution / mis-fire a refund.
+    // sweep checks — deleting it while the line is still live would strand
+    // resolution / mis-fire a refund. Once the line has gone inactive (settled or
+    // refunded) neither the oracle nor the sweep touches it again, so it's safe to
+    // remove. A missing/orphaned line is also safe (nothing left to strand).
     if (photo.isFinal && photo.challengeId) {
-      throw new HttpError(409, "You can't delete the final proof of a line.");
+      const challenge = await ChallengeModel.findById(photo.challengeId).select('status');
+      const inactive =
+        !challenge || challenge.status === 'resolved' || challenge.status === 'refunded';
+      if (!inactive) {
+        throw new HttpError(409, "You can't delete the final proof of an active line.");
+      }
     }
 
     // Drop the GridFS bytes first so we don't orphan them. Tolerate already-missing

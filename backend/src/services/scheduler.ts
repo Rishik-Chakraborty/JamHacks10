@@ -15,7 +15,10 @@ export function startScheduler(): void {
 
   cron.schedule('* * * * *', async () => {
     try {
-      const { refunded } = await sweepResolutions();
+      const { refunded, settled } = await sweepResolutions();
+      if (settled) {
+        console.log(`[scheduler] settled ${settled} line(s) whose deadline passed`);
+      }
       if (refunded) {
         console.log(`[scheduler] refunded ${refunded} no-show line(s)`);
       }

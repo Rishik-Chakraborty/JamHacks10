@@ -15,6 +15,8 @@
  * the flag is unset.
  */
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
+import OpenAI from 'openai';
+import { zodResponseFormat } from 'openai/helpers/zod';
 import { z } from 'zod';
 
 import { env } from '../../config/env';
@@ -98,6 +100,28 @@ function clamp01(n: number): number {
 
 // ─── Gemini vision call ───────────────────────────────────────────────────────
 
+/**
+ * Retry transient Gemini failures (503 overloaded / 429 rate-limit / network
+ * blips) with exponential backoff. Non-transient errors (bad request, schema)
+ * rethrow immediately. Gemini's free tier 503s under load surprisingly often, so
+ * without this a perfectly valid final proof can silently fail to get a verdict.
+ */
+async function withGeminiRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      const transient = /(\b503\b|\b429\b|unavailable|overloaded|high demand|rate.?limit|ECONNRESET|ETIMEDOUT|fetch failed)/i.test(msg);
+      if (!transient || i === attempts - 1) throw err;
+      await new Promise((r) => setTimeout(r, 600 * 2 ** i)); // 0.6s, 1.2s
+    }
+  }
+  throw lastErr;
+}
+
 async function callGemini(params: EvaluateGoalParams): Promise<GeminiVerdict> {
   const gemini = getClient();
 
@@ -174,7 +198,7 @@ async function callGemini(params: EvaluateGoalParams): Promise<GeminiVerdict> {
     })),
   ];
 
-  const result = await model.generateContent(parts);
+  const result = await withGeminiRetry(() => model.generateContent(parts));
   const text = result.response.text();
 
   let raw: unknown;
@@ -192,6 +216,70 @@ async function callGemini(params: EvaluateGoalParams): Promise<GeminiVerdict> {
   }
 
   return parsed.data;
+}
+
+// ─── OpenAI vision fallback ───────────────────────────────────────────────────
+
+/**
+ * Same verdict shape as Gemini, but WITHOUT numeric min/max — OpenAI's strict
+ * structured-output mode rejects `minimum`/`maximum` keywords. Ranges are stated
+ * in the descriptions instead, and downstream `clamp01` keeps values in-bounds.
+ */
+const openaiVerdictSchema = z
+  .object({
+    met: z.boolean().describe('Whether the success criteria is clearly met by the proof.'),
+    confidence: z.number().describe('Probability in [0,1] that the verdict is correct. Be conservative.'),
+    reasoning: z.string().describe('Brief justification tied to the observed evidence.'),
+    observedEvidence: z.array(z.string()).describe('Concrete visual facts seen in the photo(s).'),
+    photoQuality: z.number().describe('Clarity/unambiguity score in [0,1].'),
+    effortLevel: z.enum(['low', 'medium', 'high']).describe('Subjective effort level visible.'),
+    goalCompletionPercent: z.number().describe('Estimated completion percentage in [0,100].'),
+    repCount: z.number().int().describe('Reps counted across frames; 0 for a photo or non-rep goal.'),
+  })
+  .strict();
+
+let cachedOpenAI: OpenAI | null = null;
+function openaiClient(): OpenAI {
+  if (!cachedOpenAI) cachedOpenAI = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+  return cachedOpenAI;
+}
+
+/** OpenAI wants a full data URL; build one if we were handed raw base64. */
+function toDataUrl(img: EvaluateImage): string {
+  return img.base64.startsWith('data:') ? img.base64 : `data:${img.mimeType};base64,${img.base64}`;
+}
+
+/**
+ * Fallback oracle: OpenAI gpt-4o vision with the same structured verdict, used
+ * when Gemini is unavailable. gpt-4o accepts multiple images, so this works for
+ * both a single photo and a video's sampled frames.
+ */
+async function callOpenAIVision(params: EvaluateGoalParams): Promise<GeminiVerdict> {
+  const userText = buildOracleUserText(params.goalText, params.successCriteria, params.images.length);
+  const completion = await openaiClient().beta.chat.completions.parse({
+    model: env.OPENAI_COMMENTARY_MODEL,
+    messages: [
+      { role: 'system', content: ORACLE_SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content: [
+          { type: 'text' as const, text: userText },
+          ...params.images.map((img) => ({
+            type: 'image_url' as const,
+            image_url: { url: toDataUrl(img) },
+          })),
+        ],
+      },
+    ],
+    response_format: zodResponseFormat(openaiVerdictSchema, 'oracle_verdict'),
+  });
+
+  const parsed = completion.choices[0]?.message.parsed;
+  if (!parsed) {
+    const refusal = completion.choices[0]?.message.refusal;
+    throw new Error(`OpenAI vision oracle returned no structured result${refusal ? `: ${refusal}` : ''}.`);
+  }
+  return parsed;
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
@@ -216,8 +304,21 @@ export async function evaluateGoal(params: EvaluateGoalParams): Promise<OracleVe
     throw new Error('No proof images provided to the AI oracle.');
   }
 
-  // Step 1 — Gemini vision verdict
-  const geminiVerdict = await callGemini(params);
+  // Step 1 — vision verdict. Gemini is primary; if it fails (e.g. a 503 overload,
+  // even after retries) fall back to OpenAI gpt-4o vision so a real model still
+  // produces the verdict instead of stranding the line.
+  let geminiVerdict: GeminiVerdict;
+  try {
+    geminiVerdict = await callGemini(params);
+  } catch (geminiErr) {
+    if (!env.commentaryEnabled) throw geminiErr; // no fallback configured → surface the error
+    console.warn(
+      `[ai] Gemini oracle failed; falling back to OpenAI vision: ${
+        geminiErr instanceof Error ? geminiErr.message : String(geminiErr)
+      }`,
+    );
+    geminiVerdict = await callOpenAIVision(params);
+  }
 
   // Step 2 — XGBoost confidence calibration (sub-10ms, non-blocking on failure)
   let xgboostResult: Awaited<ReturnType<typeof runXGBoostInference>> | null = null;

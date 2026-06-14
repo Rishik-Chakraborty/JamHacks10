@@ -202,7 +202,7 @@ export function ChallengeDetail({ id }: { id: string }) {
           <HypeMeter hypeScore={c.hypeScore} streak={c.streak} misses={c.misses} />
           <ProgressChart metrics={c.metrics} unit={c.metricUnit} />
           <PhotoUpload challenge={c} />
-          <PhotoGallery photos={c.photos} />
+          <PhotoGallery photos={c.photos} challengeId={id} status={c.status} />
           <LineComments challengeId={id} comments={c.comments} />
         </div>
 

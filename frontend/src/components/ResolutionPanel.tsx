@@ -1,12 +1,8 @@
 'use client';
 
-import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import type { ChallengeDetail, BetSide } from '@/types/contract';
-import { api } from '@/lib/api';
+import type { ChallengeDetail } from '@/types/contract';
 import { formatSol } from '@/lib/format';
 import { Panel } from '@/components/ui/Panel';
-import { Button } from '@/components/ui/Button';
 import { Tag } from '@/components/ui/Tag';
 
 function SettleRow({ label, value, tone }: { label: string; value: string; tone?: 'accent' }) {
@@ -19,37 +15,19 @@ function SettleRow({ label, value, tone }: { label: string; value: string; tone?
 }
 
 /**
- * Resolution UI: shows the AI Trusted Oracle verdict + settlement. A confident
- * verdict settles automatically; a low-confidence one holds under review with a
- * manual settle control.
+ * Resolution UI: shows the AI Trusted Oracle verdict + settlement. A verdict
+ * settles automatically (immediately on the oracle's call, or at the deadline for
+ * a deferred line) — there is no manual settle path.
  */
 export function ResolutionPanel({ challenge }: { challenge: ChallengeDetail }) {
-  const queryClient = useQueryClient();
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
   const { status, verdict, proposedOutcome, settlement } = challenge;
   if (status !== 'under_review' && status !== 'resolved' && status !== 'refunded') return null;
-
-  async function settle(outcome: BetSide) {
-    if (busy) return;
-    setBusy(outcome);
-    setError(null);
-    try {
-      await api.resolveChallenge(challenge.id, { manualOutcome: outcome });
-      await queryClient.invalidateQueries({ queryKey: ['challenge', challenge.id] });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not settle.');
-    } finally {
-      setBusy(null);
-    }
-  }
 
   return (
     <Panel className="p-4">
       <div className="flex items-center justify-between">
         <h3 className="display text-xl text-ink">Resolution</h3>
-        {status === 'under_review' && <Tag tone="ink" solid>Under review</Tag>}
+        {status === 'under_review' && <Tag tone="ink" solid>Finalizing</Tag>}
         {status === 'resolved' && (
           <Tag tone={challenge.outcome === 'yes' ? 'yes' : 'no'} solid>Settled {challenge.outcome}</Tag>
         )}
@@ -71,7 +49,7 @@ export function ResolutionPanel({ challenge }: { challenge: ChallengeDetail }) {
               <p className="text-sm text-ink mt-1.5">
                 Verdict{' '}
                 <span className={`font-semibold ${challenge.outcome === 'yes' || proposedOutcome === 'yes' ? 'text-yes' : challenge.outcome === 'no' || proposedOutcome === 'no' ? 'text-no' : 'text-accent'}`}>
-                  {challenge.outcome ? challenge.outcome.toUpperCase() : proposedOutcome ? proposedOutcome.toUpperCase() : 'NEEDS REVIEW'}
+                  {challenge.outcome ? challenge.outcome.toUpperCase() : proposedOutcome ? proposedOutcome.toUpperCase() : 'YES'}
                 </span>
               </p>
               <p className="text-sm text-ink-2 mt-1.5">{verdict.reasoning}</p>
@@ -101,27 +79,6 @@ export function ResolutionPanel({ challenge }: { challenge: ChallengeDetail }) {
                   <SettleRow label="To winners" value={formatSol(settlement.winningPoolLamports + settlement.distributableLamports)} />
                 </div>
               )}
-            </div>
-          )}
-
-          {error && (
-            <div className="border border-no bg-no-soft px-3 py-2 mt-3">
-              <span className="label text-no">{error}</span>
-            </div>
-          )}
-
-          {/* Manual settle for a low-confidence verdict held under review. */}
-          {status === 'under_review' && (
-            <div className="mt-3">
-              <p className="text-xs text-faint mb-2">Low-confidence verdict — settle the outcome manually.</p>
-              <div className="flex items-center gap-3">
-                <Button type="button" variant="yes" size="sm" onClick={() => settle('yes')} disabled={busy !== null}>
-                  {busy === 'yes' ? 'Settling…' : 'Settle YES'}
-                </Button>
-                <Button type="button" variant="no" size="sm" onClick={() => settle('no')} disabled={busy !== null}>
-                  {busy === 'no' ? 'Settling…' : 'Settle NO'}
-                </Button>
-              </div>
             </div>
           )}
         </>

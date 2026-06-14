@@ -1,4 +1,7 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.evaluateGoal = evaluateGoal;
 /**
@@ -18,37 +21,39 @@ exports.evaluateGoal = evaluateGoal;
  * the flag is unset.
  */
 const generative_ai_1 = require("@google/generative-ai");
-const zod_1 = require("zod");
+const openai_1 = __importDefault(require("openai"));
+const zod_1 = require("openai/helpers/zod");
+const zod_2 = require("zod");
 const env_1 = require("../../config/env");
 const contract_1 = require("../../contract");
 const prompts_1 = require("./prompts");
 const xgboost_inference_1 = require("./xgboost-inference");
 /** The enhanced verdict Gemini returns (superset of OracleVerdict). */
-const geminiVerdictSchema = zod_1.z.object({
-    met: zod_1.z.boolean().describe('Whether the success criteria is clearly met by the proof.'),
-    confidence: zod_1.z
+const geminiVerdictSchema = zod_2.z.object({
+    met: zod_2.z.boolean().describe('Whether the success criteria is clearly met by the proof.'),
+    confidence: zod_2.z
         .number()
         .min(0)
         .max(1)
         .describe('Probability in [0,1] that the `met` verdict is correct. Be conservative.'),
-    reasoning: zod_1.z.string().describe('Brief justification tied to the observed evidence.'),
-    observedEvidence: zod_1.z
-        .array(zod_1.z.string())
+    reasoning: zod_2.z.string().describe('Brief justification tied to the observed evidence.'),
+    observedEvidence: zod_2.z
+        .array(zod_2.z.string())
         .describe('Concrete visual facts actually seen in the photo(s) and used to decide.'),
-    photoQuality: zod_1.z
+    photoQuality: zod_2.z
         .number()
         .min(0)
         .max(1)
         .describe('Photo clarity and unambiguity score: 1.0 = crystal clear, 0.0 = illegible/unusable.'),
-    effortLevel: zod_1.z
+    effortLevel: zod_2.z
         .enum(['low', 'medium', 'high'])
         .describe('Subjective effort level visible in the proof.'),
-    goalCompletionPercent: zod_1.z
+    goalCompletionPercent: zod_2.z
         .number()
         .min(0)
         .max(100)
         .describe('Estimated percentage of the goal criteria visually completed (0-100).'),
-    repCount: zod_1.z
+    repCount: zod_2.z
         .number()
         .int()
         .min(0)
@@ -73,6 +78,29 @@ function clamp01(n) {
     return Math.max(0, Math.min(1, n));
 }
 // ─── Gemini vision call ───────────────────────────────────────────────────────
+/**
+ * Retry transient Gemini failures (503 overloaded / 429 rate-limit / network
+ * blips) with exponential backoff. Non-transient errors (bad request, schema)
+ * rethrow immediately. Gemini's free tier 503s under load surprisingly often, so
+ * without this a perfectly valid final proof can silently fail to get a verdict.
+ */
+async function withGeminiRetry(fn, attempts = 3) {
+    let lastErr;
+    for (let i = 0; i < attempts; i++) {
+        try {
+            return await fn();
+        }
+        catch (err) {
+            lastErr = err;
+            const msg = err instanceof Error ? err.message : String(err);
+            const transient = /(\b503\b|\b429\b|unavailable|overloaded|high demand|rate.?limit|ECONNRESET|ETIMEDOUT|fetch failed)/i.test(msg);
+            if (!transient || i === attempts - 1)
+                throw err;
+            await new Promise((r) => setTimeout(r, 600 * 2 ** i)); // 0.6s, 1.2s
+        }
+    }
+    throw lastErr;
+}
 async function callGemini(params) {
     const gemini = getClient();
     const model = gemini.getGenerativeModel({
@@ -140,7 +168,7 @@ async function callGemini(params) {
             },
         })),
     ];
-    const result = await model.generateContent(parts);
+    const result = await withGeminiRetry(() => model.generateContent(parts));
     const text = result.response.text();
     let raw;
     try {
@@ -154,6 +182,65 @@ async function callGemini(params) {
         throw new Error(`Gemini verdict schema mismatch: ${parsed.error.message}. Raw: ${text.slice(0, 300)}`);
     }
     return parsed.data;
+}
+// ─── OpenAI vision fallback ───────────────────────────────────────────────────
+/**
+ * Same verdict shape as Gemini, but WITHOUT numeric min/max — OpenAI's strict
+ * structured-output mode rejects `minimum`/`maximum` keywords. Ranges are stated
+ * in the descriptions instead, and downstream `clamp01` keeps values in-bounds.
+ */
+const openaiVerdictSchema = zod_2.z
+    .object({
+    met: zod_2.z.boolean().describe('Whether the success criteria is clearly met by the proof.'),
+    confidence: zod_2.z.number().describe('Probability in [0,1] that the verdict is correct. Be conservative.'),
+    reasoning: zod_2.z.string().describe('Brief justification tied to the observed evidence.'),
+    observedEvidence: zod_2.z.array(zod_2.z.string()).describe('Concrete visual facts seen in the photo(s).'),
+    photoQuality: zod_2.z.number().describe('Clarity/unambiguity score in [0,1].'),
+    effortLevel: zod_2.z.enum(['low', 'medium', 'high']).describe('Subjective effort level visible.'),
+    goalCompletionPercent: zod_2.z.number().describe('Estimated completion percentage in [0,100].'),
+    repCount: zod_2.z.number().int().describe('Reps counted across frames; 0 for a photo or non-rep goal.'),
+})
+    .strict();
+let cachedOpenAI = null;
+function openaiClient() {
+    if (!cachedOpenAI)
+        cachedOpenAI = new openai_1.default({ apiKey: env_1.env.OPENAI_API_KEY });
+    return cachedOpenAI;
+}
+/** OpenAI wants a full data URL; build one if we were handed raw base64. */
+function toDataUrl(img) {
+    return img.base64.startsWith('data:') ? img.base64 : `data:${img.mimeType};base64,${img.base64}`;
+}
+/**
+ * Fallback oracle: OpenAI gpt-4o vision with the same structured verdict, used
+ * when Gemini is unavailable. gpt-4o accepts multiple images, so this works for
+ * both a single photo and a video's sampled frames.
+ */
+async function callOpenAIVision(params) {
+    const userText = (0, prompts_1.buildOracleUserText)(params.goalText, params.successCriteria, params.images.length);
+    const completion = await openaiClient().beta.chat.completions.parse({
+        model: env_1.env.OPENAI_COMMENTARY_MODEL,
+        messages: [
+            { role: 'system', content: prompts_1.ORACLE_SYSTEM_PROMPT },
+            {
+                role: 'user',
+                content: [
+                    { type: 'text', text: userText },
+                    ...params.images.map((img) => ({
+                        type: 'image_url',
+                        image_url: { url: toDataUrl(img) },
+                    })),
+                ],
+            },
+        ],
+        response_format: (0, zod_1.zodResponseFormat)(openaiVerdictSchema, 'oracle_verdict'),
+    });
+    const parsed = completion.choices[0]?.message.parsed;
+    if (!parsed) {
+        const refusal = completion.choices[0]?.message.refusal;
+        throw new Error(`OpenAI vision oracle returned no structured result${refusal ? `: ${refusal}` : ''}.`);
+    }
+    return parsed;
 }
 // ─── Main export ──────────────────────────────────────────────────────────────
 /**
@@ -175,8 +262,19 @@ async function evaluateGoal(params) {
     if (params.images.length === 0) {
         throw new Error('No proof images provided to the AI oracle.');
     }
-    // Step 1 — Gemini vision verdict
-    const geminiVerdict = await callGemini(params);
+    // Step 1 — vision verdict. Gemini is primary; if it fails (e.g. a 503 overload,
+    // even after retries) fall back to OpenAI gpt-4o vision so a real model still
+    // produces the verdict instead of stranding the line.
+    let geminiVerdict;
+    try {
+        geminiVerdict = await callGemini(params);
+    }
+    catch (geminiErr) {
+        if (!env_1.env.commentaryEnabled)
+            throw geminiErr; // no fallback configured → surface the error
+        console.warn(`[ai] Gemini oracle failed; falling back to OpenAI vision: ${geminiErr instanceof Error ? geminiErr.message : String(geminiErr)}`);
+        geminiVerdict = await callOpenAIVision(params);
+    }
     // Step 2 — XGBoost confidence calibration (sub-10ms, non-blocking on failure)
     let xgboostResult = null;
     try {
@@ -230,7 +328,7 @@ async function evaluateGoal(params) {
     return verdict;
 }
 // ─── Vultr ensemble (unchanged, secondary non-fatal second opinion) ───────────
-const secondarySchema = zod_1.z.object({ met: zod_1.z.boolean(), confidence: zod_1.z.number() });
+const secondarySchema = zod_2.z.object({ met: zod_2.z.boolean(), confidence: zod_2.z.number() });
 async function querySecondaryOracle(params) {
     try {
         const controller = new AbortController();

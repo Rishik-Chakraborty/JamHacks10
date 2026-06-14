@@ -94,12 +94,27 @@ async function reviewChallenge(challengeId) {
         throw new error_1.HttpError(400, 'No proof to evaluate — the influencer must post a final photo/video first');
     let verdict;
     if (env_1.env.aiEnabled) {
-        const images = await buildImages(finalPhoto);
-        verdict = await (0, ai_1.evaluateGoal)({
-            images,
-            goalText: challenge.goalText,
-            successCriteria: challenge.successCriteria,
-        });
+        try {
+            const images = await buildImages(finalPhoto);
+            verdict = await (0, ai_1.evaluateGoal)({
+                images,
+                goalText: challenge.goalText,
+                successCriteria: challenge.successCriteria,
+            });
+        }
+        catch (err) {
+            // Last resort: BOTH AI oracles failed (Gemini, then the OpenAI vision
+            // fallback). Rather than strand the line on `active`, advance it to manual
+            // review so it's visibly pending instead of silently stuck.
+            console.warn(`[resolve] both AI oracles failed; routing line ${challengeId} to manual review: ${err instanceof Error ? err.message : String(err)}`);
+            verdict = {
+                met: false,
+                confidence: 0,
+                reasoning: 'Both AI oracles were temporarily unavailable — this line needs a manual verdict.',
+                observedEvidence: [],
+                needsManualReview: true,
+            };
+        }
     }
     else {
         // No AI configured → can't auto-decide; route to manual review.
@@ -116,17 +131,23 @@ async function reviewChallenge(challengeId) {
     challenge.set('verdict', verdict);
     challenge.proposedOutcome = proposedOutcome;
     await challenge.save();
+    const deadlineReached = challenge.deadline.getTime() <= Date.now();
     (0, realtime_1.emitTicker)({
         kind: 'commentary',
         challengeId,
         challengeTitle: challenge.title,
         message: proposedOutcome
-            ? `Verdict in: ${proposedOutcome.toUpperCase()} — settling.`
+            ? deadlineReached
+                ? `Verdict in: ${proposedOutcome.toUpperCase()} — settling.`
+                : `Verdict in: ${proposedOutcome.toUpperCase()} — settles at the deadline.`
             : 'Final proof in — flagged for manual review.',
         at: new Date().toISOString(),
     });
-    // A confident verdict settles immediately; low-confidence holds for manual review.
-    if (proposedOutcome) {
+    // A confident verdict settles — but only once the deadline has passed. Betting is
+    // open until the deadline and the on-chain market rejects an early resolve
+    // (DeadlineNotReached), so before then we hold at `under_review`; the cron sweep
+    // finalizes it once the deadline hits.
+    if (proposedOutcome && deadlineReached) {
         await finalizeChallenge(challengeId, proposedOutcome);
     }
     return { verdict, proposedOutcome };
@@ -141,7 +162,12 @@ async function finalizeChallenge(challengeId, outcome) {
     if (challenge.status === 'resolved')
         throw new error_1.HttpError(409, 'Line already resolved');
     let resolveTxSig;
-    if (env_1.env.solanaEnabled && challenge.marketPda) {
+    // The on-chain program rejects resolve_market before the deadline
+    // (DeadlineNotReached). Only attempt the on-chain settle once the deadline has
+    // passed; otherwise resolve in MongoDB only (reached only via a pre-deadline
+    // manual override — the normal path is gated upstream in reviewChallenge).
+    const deadlineReached = challenge.deadline.getTime() <= Date.now();
+    if (env_1.env.solanaEnabled && challenge.marketPda && deadlineReached) {
         try {
             const dto = (0, Challenge_1.challengeToDTO)(challenge);
             resolveTxSig = await (0, solana_1.resolveMarket)(dto, outcome);
@@ -157,6 +183,9 @@ async function finalizeChallenge(challengeId, outcome) {
             // proceeds so bettors can see the outcome; log for investigation.
             console.warn(`[resolve] On-chain resolve_market failed (non-fatal, MongoDB resolution continues): ${err instanceof Error ? err.message : String(err)}`);
         }
+    }
+    else if (env_1.env.solanaEnabled && challenge.marketPda && !deadlineReached) {
+        console.warn(`[resolve] On-chain resolve skipped for ${challengeId} — deadline not reached; MongoDB resolution only.`);
     }
     challenge.status = 'resolved';
     challenge.outcome = outcome;
@@ -267,6 +296,23 @@ async function resolveChallenge(challengeId, manualOutcome) {
 async function sweepResolutions() {
     const now = Date.now();
     let refunded = 0;
+    let settled = 0;
+    // Verdict already in, but settlement was deferred until the deadline (betting is
+    // open until then). Now that the deadline has passed, finalize on-chain + Mongo.
+    const settleable = await Challenge_1.ChallengeModel.find({
+        status: 'under_review',
+        proposedOutcome: { $in: ['yes', 'no'] },
+        deadline: { $lte: new Date(now) },
+    }).select('_id proposedOutcome');
+    for (const c of settleable) {
+        try {
+            await finalizeChallenge(c._id.toString(), c.proposedOutcome);
+            settled++;
+        }
+        catch (err) {
+            console.warn('[sweep] finalize failed for', c._id.toString(), err);
+        }
+    }
     // Accepted lines past (deadline + grace) with no final proof → refund (no-show).
     const graceCutoff = new Date(now - contract_1.PROOF_GRACE_HOURS * HOUR_MS);
     const overdue = await Challenge_1.ChallengeModel.find({ status: 'active', deadline: { $lte: graceCutoff } }).select('_id');
@@ -282,5 +328,5 @@ async function sweepResolutions() {
             console.warn('[sweep] refund failed for', c._id.toString(), err);
         }
     }
-    return { refunded };
+    return { refunded, settled };
 }
