@@ -26,8 +26,6 @@ pub const SIDE_NO: u8 = 1;
 /// Max slug length used as a PDA seed.
 pub const MAX_SLUG_LEN: usize = 32;
 
-/// Bets lock this many seconds before the deadline (12h).
-pub const BET_LOCK_SECONDS: i64 = 12 * 60 * 60;
 /// Basis-points denominator (10000 = 100%).
 pub const BPS_DENOM: u128 = 10_000;
 
@@ -76,7 +74,7 @@ pub mod gymcast {
         Ok(())
     }
 
-    /// Place a YES/NO bet. The influencer can't bet; betting locks 12h before the
+    /// Place a YES/NO bet. The influencer can't bet; betting is open until the
     /// deadline. Transfers `amount` lamports bettor -> vault.
     pub fn place_bet(ctx: Context<PlaceBet>, side: u8, amount: u64) -> Result<()> {
         require!(amount > 0, GymError::ZeroAmount);
@@ -91,13 +89,9 @@ pub mod gymcast {
             GymError::InfluencerCannotBet
         );
 
-        // Lock betting 12h before the deadline.
+        // Betting is open right up until the deadline.
         let now = Clock::get()?.unix_timestamp;
-        let lock_at = market
-            .deadline
-            .checked_sub(BET_LOCK_SECONDS)
-            .ok_or(GymError::MathOverflow)?;
-        require!(now < lock_at, GymError::MarketLocked);
+        require!(now < market.deadline, GymError::MarketLocked);
 
         // Escrow: bettor -> vault.
         system_program::transfer(
@@ -138,8 +132,9 @@ pub mod gymcast {
         Ok(())
     }
 
-    /// Resolve the market. Only the oracle `authority`, only after the deadline.
-    /// Skims the creator cut (-> influencer) + platform fee from the losing pool.
+    /// Resolve the market. Only the oracle `authority`; the trusted oracle may
+    /// resolve at any time (the backend gates the timing). Skims the creator cut
+    /// (-> influencer) + platform fee from the losing pool.
     pub fn resolve_market(ctx: Context<ResolveMarket>, outcome: u8) -> Result<()> {
         require!(
             outcome == OUTCOME_YES || outcome == OUTCOME_NO,
@@ -150,8 +145,9 @@ pub mod gymcast {
         {
             let market = &ctx.accounts.market;
             require!(!market.resolved && !market.refunded, GymError::MarketResolved);
-            let now = Clock::get()?.unix_timestamp;
-            require!(now >= market.deadline, GymError::DeadlineNotReached);
+            // No on-chain deadline wait — only the trusted oracle authority can
+            // reach this (enforced by `has_one = authority`), and the backend
+            // decides when to settle.
             require!(ctx.accounts.influencer.key() == market.influencer, GymError::Unauthorized);
             require!(ctx.accounts.platform.key() == market.platform, GymError::Unauthorized);
         }

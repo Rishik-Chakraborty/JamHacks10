@@ -108,6 +108,21 @@ betsRouter.post(
   }),
 );
 
+// POST /api/bets/claim — mark the wallet's position on a line as claimed, so the
+// claim button stays permanently claimed (the on-chain `position.claimed` is the
+// real guard; this mirrors it for the UI and survives refresh).
+const claimSchema = z.object({ challengeId: z.string().min(1), wallet: z.string().min(1) });
+betsRouter.post(
+  '/claim',
+  validateBody(claimSchema),
+  asyncHandler(async (req, res) => {
+    const { challengeId, wallet } = req.body as z.infer<typeof claimSchema>;
+    const cid = assertObjectId(challengeId, 'challenge');
+    await BetModel.updateMany({ challengeId: cid, bettorWallet: wallet }, { $set: { claimed: true } });
+    res.json({ ok: true });
+  }),
+);
+
 // GET /api/challenges/:id/bets
 challengeBetsRouter.get(
   '/:id/bets',

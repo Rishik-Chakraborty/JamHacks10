@@ -29,6 +29,7 @@ import {
 } from '../contract';
 import { env } from '../config/env';
 import { reviewGoal } from '../services/ai';
+import { seedHouseBet } from '../services/houseBot';
 import { computeSettlement } from '../services/payouts';
 import { ChallengeModel, challengeToDTO } from '../models/Challenge';
 import { UserModel } from '../models/User';
@@ -270,6 +271,12 @@ challengesRouter.get(
 
     const dto = challengeToDTO(challenge);
     dto.likedByMe = viewer ? (challenge.likes ?? []).includes(viewer) : false;
+
+    // Has the connected viewer already claimed their winnings on this line?
+    const viewerClaimed = viewer
+      ? (await BetModel.exists({ challengeId: _id, bettorWallet: viewer, claimed: true })) !== null
+      : false;
+
     const detail: ChallengeDetail = {
       ...dto,
       odds: computeOdds(challenge.yesPoolLamports, challenge.noPoolLamports),
@@ -278,6 +285,7 @@ challengesRouter.get(
       recentBets: recentBets.map(betToDTO),
       comments: comments.map(commentToDTO),
       settlement: computeSettlement(dto) ?? undefined,
+      viewerClaimed,
     };
     res.json(detail);
   }),
@@ -308,6 +316,12 @@ challengesRouter.post(
     );
     if (!doc) throw new HttpError(404, 'Challenge not found');
     res.json(challengeToDTO(doc));
+
+    // House bot seeds a small underdog counter-bet so the market is never
+    // one-sided (real losing pool → claim pays out; odds read a realistic split).
+    void seedHouseBet(_id.toString()).catch((e) =>
+      console.warn('[challenges] house-bot seed failed:', e),
+    );
   }),
 );
 

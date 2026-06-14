@@ -102,6 +102,9 @@ export const api = {
   // bets
   listBets: (challengeId: string) => request<Bet[]>(`/challenges/${challengeId}/bets`),
   createBet: (body: CreateBetBody) => request<Bet>('/bets', { method: 'POST', body: JSON.stringify(body) }),
+  /** Persist that a wallet claimed its winnings on a line (UI stays claimed across refresh). */
+  markClaimed: (challengeId: string, wallet: string) =>
+    request<{ ok: boolean }>('/bets/claim', { method: 'POST', body: JSON.stringify({ challengeId, wallet }) }),
 
   // comments
   listComments: (challengeId: string) => request<Comment[]>(`/challenges/${challengeId}/comments`),

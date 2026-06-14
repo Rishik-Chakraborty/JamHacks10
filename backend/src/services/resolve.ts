@@ -176,12 +176,9 @@ export async function finalizeChallenge(challengeId: string, outcome: BetSide): 
   if (challenge.status === 'resolved') throw new HttpError(409, 'Line already resolved');
 
   let resolveTxSig: string | undefined;
-  // The on-chain program rejects resolve_market before the deadline
-  // (DeadlineNotReached). Only attempt the on-chain settle once the deadline has
-  // passed; otherwise resolve in MongoDB only (reached only via a pre-deadline
-  // manual override — the normal path is gated upstream in reviewChallenge).
-  const deadlineReached = challenge.deadline.getTime() <= Date.now();
-  if (env.solanaEnabled && challenge.marketPda && deadlineReached) {
+  // The on-chain program now allows the oracle authority to resolve at any time,
+  // so settle on-chain immediately (this is what lets winners claim right away).
+  if (env.solanaEnabled && challenge.marketPda) {
     try {
       const dto = challengeToDTO(challenge);
       resolveTxSig = await resolveMarket(dto, outcome);
@@ -198,10 +195,6 @@ export async function finalizeChallenge(challengeId: string, outcome: BetSide): 
         `[resolve] On-chain resolve_market failed (non-fatal, MongoDB resolution continues): ${err instanceof Error ? err.message : String(err)}`,
       );
     }
-  } else if (env.solanaEnabled && challenge.marketPda && !deadlineReached) {
-    console.warn(
-      `[resolve] On-chain resolve skipped for ${challengeId} — deadline not reached; MongoDB resolution only.`,
-    );
   }
 
   challenge.status = 'resolved';

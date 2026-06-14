@@ -28,7 +28,7 @@ import {
 } from '@solana/web3.js';
 
 import { env } from '../config/env';
-import { OUTCOME_YES, OUTCOME_NO, type BetSide, type Challenge } from '../contract';
+import { OUTCOME_YES, OUTCOME_NO, SIDE_YES, SIDE_NO, type BetSide, type Challenge } from '../contract';
 import idlJson from '../../../solana/idl/gymcast.json';
 
 /** Anchor IDL for the gymcast program (typed loosely as `Idl`). */
@@ -195,6 +195,48 @@ export async function fetchMarket(marketPda: string): Promise<MarketState | null
     outcome: raw.outcome,
     slug: raw.slug,
   };
+}
+
+/** The wallet the house bot bets from (the oracle authority keypair). */
+export function getBotWallet(): string {
+  const { authority } = getClient();
+  return authority.publicKey.toBase58();
+}
+
+/**
+ * House-bot bet (demo): place a small on-chain bet signed by the authority
+ * keypair so a market is never one-sided and winners have a real losing pool to
+ * claim from. The authority is not the influencer, so the program allows it.
+ */
+export async function placeBotBet(
+  challenge: Challenge,
+  side: BetSide,
+  amountLamports: number,
+): Promise<{ txSig: string; positionPda: string }> {
+  assertEnabled();
+  if (!challenge.marketPda) {
+    throw new Error(`challenge ${challenge.id} has no marketPda — initialize_market must run first`);
+  }
+
+  const { program, authority, programId } = getClient();
+  const market = new PublicKey(challenge.marketPda);
+  const vault = deriveVaultPda(market, programId);
+  const position = derivePositionPda(market, authority.publicKey, programId);
+  const sideByte = side === 'yes' ? SIDE_YES : SIDE_NO;
+
+  const txSig = await program.methods
+    .placeBet(sideByte, new BN(amountLamports))
+    .accounts({
+      bettor: authority.publicKey,
+      market,
+      vault,
+      position,
+      systemProgram: SystemProgram.programId,
+    })
+    .signers([authority])
+    .rpc();
+
+  return { txSig, positionPda: position.toBase58() };
 }
 
 /* -------------------------------------------------------------------------- */

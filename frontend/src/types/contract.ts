@@ -381,6 +381,8 @@ export interface ChallengeDetail extends Challenge {
   comments: Comment[];
   /** Realized payout split — present once the line is resolved. */
   settlement?: Settlement;
+  /** Whether the connected viewer has already claimed their winnings on this line. */
+  viewerClaimed?: boolean;
 }
 
 /** A bettor's position: their bet joined with the market it was placed on. */
