@@ -260,6 +260,13 @@ export interface CreateUserBody {
   bio?: string;
 }
 
+/** Result of GET /api/users/check-username — drives live username validation. */
+export interface UsernameCheck {
+  available: boolean;
+  /** Why it's unavailable (taken or malformed); absent when available. */
+  reason?: string;
+}
+
 /**
  * Create a line: a challenger proposes a goal for an influencer and seeds the
  * first bet. The line opens as `pending_accept` until the influencer accepts.
@@ -607,6 +614,7 @@ export const API_ROUTES = {
   health: 'GET /api/health',
   // users
   createUser: 'POST /api/users',
+  checkUsername: 'GET /api/users/check-username?u=', // ?wallet= excludes self
   searchUsers: 'GET /api/users/search?q=',
   getUser: 'GET /api/users/:wallet',
   getPositions: 'GET /api/users/:wallet/positions',

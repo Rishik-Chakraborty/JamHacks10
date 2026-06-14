@@ -15,6 +15,7 @@ import type {
   Profile,
   FollowResult,
   LikeResult,
+  UsernameCheck,
   CreateUserBody,
   CreateChallengeBody,
   AttachMarketBody,
@@ -46,6 +47,18 @@ export const api = {
   updateProfile: (body: CreateUserBody) => request<User>('/users', { method: 'POST', body: JSON.stringify(body) }),
   searchUsers: (q: string) => request<User[]>(`/users/search?q=${encodeURIComponent(q)}`),
   getUser: (wallet: string) => request<User>(`/users/${wallet}`),
+  /** Like getUser but resolves to null (instead of throwing) when no account exists yet. */
+  getUserSafe: async (wallet: string): Promise<User | null> => {
+    const res = await fetch(`${BASE}/users/${wallet}`);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+    return res.json() as Promise<User>;
+  },
+  /** Live username availability. Pass the caller's wallet to exclude their own current name. */
+  checkUsername: (username: string, wallet?: string) =>
+    request<UsernameCheck>(
+      `/users/check-username?u=${encodeURIComponent(username)}${wallet ? `&wallet=${wallet}` : ''}`,
+    ),
   toggleFollow: (wallet: string, follower: string) =>
     request<FollowResult>(`/users/${wallet}/follow`, { method: 'POST', body: JSON.stringify({ follower }) }),
   getFollowing: (wallet: string) => request<string[]>(`/users/${wallet}/following`),
@@ -82,6 +95,9 @@ export const api = {
   // photos
   listPhotos: (challengeId: string) => request<Photo[]>(`/challenges/${challengeId}/photos`),
   createPhoto: (body: CreatePhotoBody) => request<Photo>('/photos', { method: 'POST', body: JSON.stringify(body) }),
+  /** Delete a post you authored (wallet must match the post's author). */
+  deletePhoto: (photoId: string, wallet: string) =>
+    request<{ id: string }>(`/photos/${photoId}`, { method: 'DELETE', body: JSON.stringify({ wallet }) }),
 
   // bets
   listBets: (challengeId: string) => request<Bet[]>(`/challenges/${challengeId}/bets`),

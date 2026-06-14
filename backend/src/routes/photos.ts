@@ -123,6 +123,32 @@ photosRouter.post(
   }),
 );
 
+// DELETE /api/photos/:id — remove a post you authored (and its GridFS bytes).
+const deletePhotoSchema = z.object({ wallet: z.string().min(1) });
+photosRouter.delete(
+  '/:id',
+  validateBody(deletePhotoSchema),
+  asyncHandler(async (req, res) => {
+    const _id = assertObjectId(req.params.id, 'photo');
+    const { wallet } = req.body as z.infer<typeof deletePhotoSchema>;
+
+    const photo = await PhotoModel.findById(_id);
+    if (!photo) throw new HttpError(404, 'Photo not found');
+    // Only the post's author may delete it.
+    if (photo.authorWallet !== wallet) {
+      throw new HttpError(403, 'You can only delete your own posts');
+    }
+
+    // Drop the GridFS bytes first; if that fails the doc stays so we don't orphan it.
+    if (photo.gridFsId) {
+      await getBucket().delete(photo.gridFsId as Types.ObjectId);
+    }
+    await photo.deleteOne();
+
+    res.json({ id: _id.toString() });
+  }),
+);
+
 // GET /api/photos/:id/image — stream bytes (inline base64 or GridFS).
 photosRouter.get(
   '/:id/image',

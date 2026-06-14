@@ -30,28 +30,76 @@ export async function enrichUser(doc: HydratedDocument<UserDoc>): Promise<User> 
   };
 }
 
+/** Usernames: 3–20 chars, letters / numbers / underscores. Unique (case-insensitive). */
+const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
+const usernameField = z
+  .string()
+  .trim()
+  .regex(USERNAME_RE, 'Username must be 3–20 letters, numbers, or underscores.');
+
+/** Case-insensitive collation so lookups match the unique index on `username`. */
+const CI = { locale: 'en', strength: 2 } as const;
+
+/** Is `username` already taken by a wallet other than `selfWallet`? */
+async function usernameTaken(username: string, selfWallet?: string): Promise<boolean> {
+  const filter: Record<string, unknown> = { username };
+  if (selfWallet) filter.wallet = { $ne: selfWallet };
+  const existing = await UserModel.findOne(filter).collation(CI);
+  return existing !== null;
+}
+
 const createUserSchema: z.ZodType<CreateUserBody> = z.object({
   wallet: z.string().min(1),
-  username: z.string().min(1),
+  username: usernameField,
   avatar: z.string().optional(),
   bio: z.string().optional(),
 });
 
-// POST /api/users — upsert by wallet.
+// GET /api/users/check-username?u=<name>&wallet=<self> — live availability check.
+// Declared before /:wallet so the literal path isn't swallowed as a wallet.
+usersRouter.get(
+  '/check-username',
+  asyncHandler(async (req, res) => {
+    const u = typeof req.query.u === 'string' ? req.query.u.trim() : '';
+    const self = typeof req.query.wallet === 'string' ? req.query.wallet : undefined;
+
+    if (!USERNAME_RE.test(u)) {
+      res.json({ available: false, reason: 'Username must be 3–20 letters, numbers, or underscores.' });
+      return;
+    }
+    const taken = await usernameTaken(u, self);
+    res.json({ available: !taken, reason: taken ? 'That username is taken.' : undefined });
+  }),
+);
+
+// POST /api/users — upsert by wallet. Enforces unique (case-insensitive) usernames.
 usersRouter.post(
   '/',
   validateBody(createUserSchema),
   asyncHandler(async (req, res) => {
     const body = req.body as CreateUserBody;
-    const doc = await UserModel.findOneAndUpdate(
-      { wallet: body.wallet },
-      {
-        $set: { username: body.username, avatar: body.avatar, bio: body.bio },
-        $setOnInsert: { wallet: body.wallet },
-      },
-      { new: true, upsert: true, setDefaultsOnInsert: true },
-    );
-    res.status(201).json(userToDTO(doc));
+
+    if (await usernameTaken(body.username, body.wallet)) {
+      throw new HttpError(409, 'That username is taken.');
+    }
+
+    try {
+      const doc = await UserModel.findOneAndUpdate(
+        { wallet: body.wallet },
+        {
+          $set: { username: body.username, avatar: body.avatar, bio: body.bio },
+          $setOnInsert: { wallet: body.wallet },
+        },
+        { new: true, upsert: true, setDefaultsOnInsert: true },
+      );
+      res.status(201).json(userToDTO(doc));
+    } catch (err) {
+      // Backstop for the check→write race: the unique index rejects duplicates.
+      if ((err as { code?: number }).code === 11000) {
+        throw new HttpError(409, 'That username is taken.');
+      }
+      throw err;
+    }
   }),
 );
 

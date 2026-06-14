@@ -4,6 +4,8 @@ import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { User } from '@/types/contract';
 import { api } from '@/lib/api';
+import { useUsernameAvailability, USERNAME_MAX } from '@/lib/username';
+import { UsernameHint } from '@/components/OnboardingGate';
 import { Panel } from '@/components/ui/Panel';
 import { Button } from '@/components/ui/Button';
 
@@ -54,6 +56,9 @@ export function EditProfile({ wallet, user }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Live unique-username validation (excludes the user's own current name).
+  const check = useUsernameAvailability(username, wallet, user?.username);
+
   async function onAvatar(file: File) {
     setError(null);
     try {
@@ -66,8 +71,8 @@ export function EditProfile({ wallet, user }: Props) {
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
     const name = username.trim();
-    if (name.length < 1) {
-      setError('Pick a name.');
+    if (!check.ok) {
+      setError(check.message || 'Pick an available username.');
       return;
     }
     setBusy(true);
@@ -80,6 +85,7 @@ export function EditProfile({ wallet, user }: Props) {
         avatar,
       });
       await queryClient.invalidateQueries({ queryKey: ['profile', wallet] });
+      await queryClient.invalidateQueries({ queryKey: ['account', wallet] });
       setOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save your profile.');
@@ -139,18 +145,19 @@ export function EditProfile({ wallet, user }: Props) {
           />
         </div>
 
-        {/* Name */}
+        {/* Username (unique) */}
         <label className="block">
-          <span className="label">Name</span>
+          <span className="label">Username</span>
           <input
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder="Your display name"
-            maxLength={40}
+            placeholder="3–20 letters, numbers, or _"
+            maxLength={USERNAME_MAX}
             disabled={busy}
             className="mt-1.5 w-full h-10 px-3 bg-card border border-line text-ink placeholder:text-faint focus:border-ink focus:outline-none"
           />
+          <UsernameHint status={check.status} message={check.message} />
         </label>
 
         {/* Bio */}
@@ -177,7 +184,7 @@ export function EditProfile({ wallet, user }: Props) {
         )}
 
         <div className="flex items-center gap-3">
-          <Button type="submit" variant="accent" size="md" disabled={busy}>
+          <Button type="submit" variant="accent" size="md" disabled={busy || !check.ok}>
             {busy ? 'Saving…' : 'Save'}
           </Button>
           <button

@@ -9,6 +9,7 @@ const userSchema = new Schema(
   {
     wallet: { type: String, required: true, unique: true, index: true },
     username: { type: String, required: true },
+    // username uniqueness enforced case-insensitively via the collation index below.
     avatar: { type: String },
     bio: { type: String },
     /** Opted into creator mode (set when they accept their first line). */
@@ -17,6 +18,13 @@ const userSchema = new Schema(
     noShows: { type: Number, default: 0 },
   },
   { timestamps: { createdAt: true, updatedAt: false }, collection: 'users' },
+);
+
+// Case-insensitive unique usernames: "Alice" and "alice" collide. The same
+// collation must be passed on lookups (see routes/users.ts) for it to be used.
+userSchema.index(
+  { username: 1 },
+  { unique: true, collation: { locale: 'en', strength: 2 } },
 );
 
 export type UserDoc = InferSchemaType<typeof userSchema>;

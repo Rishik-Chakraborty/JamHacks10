@@ -203,7 +203,8 @@ export function CreateChallengeForm() {
         throw err;
       }
 
-      await api.createUser({ wallet: wallet!, username: shortWallet(wallet!) }).catch(() => {});
+      // Note: no lazy account creation here — wallets pick a unique username via
+      // the onboarding gate on first connect, so we must not overwrite it.
 
       // Best-effort on-chain market init (challenger signs). Degrades gracefully.
       const programId = process.env.NEXT_PUBLIC_PROGRAM_ID;

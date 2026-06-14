@@ -4,6 +4,7 @@ import "./globals.css";
 import { Providers } from "@/components/Providers";
 import { Masthead } from "@/components/Masthead";
 import { Ticker } from "@/components/Ticker";
+import { OnboardingGate } from "@/components/OnboardingGate";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -32,6 +33,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <Masthead />
           <main className="flex-1 w-full pb-16">{children}</main>
           <Ticker />
+          <OnboardingGate />
         </Providers>
       </body>
     </html>

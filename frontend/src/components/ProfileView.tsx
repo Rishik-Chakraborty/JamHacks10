@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useWallet } from '@solana/wallet-adapter-react';
+import { Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { formatSol, shortWallet } from '@/lib/format';
 import type { Profile, Challenge, FeedPost } from '@/types/contract';
@@ -35,6 +36,24 @@ export function ProfileView({ wallet }: { wallet: string }) {
   });
 
   const [tab, setTab] = useState<'posts' | 'lines'>('posts');
+
+  const queryClient = useQueryClient();
+  const deleteMutation = useMutation({
+    mutationFn: (photoId: string) => api.deletePhoto(photoId, viewerWallet!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['profile', wallet] });
+      queryClient.invalidateQueries({ queryKey: ['feed'] });
+    },
+    onError: (err) => {
+      window.alert(err instanceof Error ? err.message : 'Could not delete this post.');
+    },
+  });
+
+  const handleDelete = (photoId: string) => {
+    if (!viewerWallet) return;
+    if (!window.confirm('Delete this post? This cannot be undone.')) return;
+    deleteMutation.mutate(photoId);
+  };
 
   if (isLoading) {
     return (
@@ -204,7 +223,13 @@ export function ProfileView({ wallet }: { wallet: string }) {
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-px bg-line border border-line mt-5">
               {posts.map((post) => (
-                <PostThumb key={post.photo.id} post={post} />
+                <PostThumb
+                  key={post.photo.id}
+                  post={post}
+                  canDelete={isOwn}
+                  onDelete={handleDelete}
+                  deleting={deleteMutation.isPending && deleteMutation.variables === post.photo.id}
+                />
               ))}
             </div>
           )
@@ -263,7 +288,17 @@ function LineGroup({
   );
 }
 
-function PostThumb({ post }: { post: FeedPost }) {
+function PostThumb({
+  post,
+  canDelete,
+  onDelete,
+  deleting,
+}: {
+  post: FeedPost;
+  canDelete: boolean;
+  onDelete: (photoId: string) => void;
+  deleting: boolean;
+}) {
   const { photo, challenge, likeCount } = post;
   // Line-attached posts link to the line; standalone posts aren't clickable-through.
   const Wrapper = challenge
@@ -292,6 +327,23 @@ function PostThumb({ post }: { post: FeedPost }) {
         {isVideo(photo) && <Tag tone="ink" solid>Video</Tag>}
         {challenge && <Tag tone="muted" solid>Line</Tag>}
       </div>
+
+      {/* Delete — only on your own posts */}
+      {canDelete && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onDelete(photo.id);
+          }}
+          disabled={deleting}
+          aria-label="Delete post"
+          className="absolute top-0 right-0 z-10 m-1.5 flex h-7 w-7 items-center justify-center border border-line bg-ink/80 text-paper opacity-0 transition-opacity hover:bg-no group-hover:opacity-100 disabled:opacity-50"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      )}
 
       {/* Like overlay — appears on hover */}
       <div className="absolute inset-0 bg-ink/70 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
