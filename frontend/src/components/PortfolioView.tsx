@@ -267,7 +267,10 @@ function WonStatus({ position }: { position: PortfolioPosition }) {
 
   const programReady = Boolean(process.env.NEXT_PUBLIC_PROGRAM_ID);
   const marketReady = Boolean(c.marketPda);
-  const claimable = !b.claimed && programReady && marketReady;
+  // Only a real on-chain place_bet created an on-chain Position to claim against.
+  // Web2 + seed bets use synthetic tx ids and have no on-chain position.
+  const isOnChainBet = !b.txSig.startsWith('web2_') && !b.txSig.startsWith('seed_');
+  const claimable = !b.claimed && programReady && marketReady && isOnChainBet;
 
   async function onClaim() {
     if (!c.marketPda) return;
@@ -305,6 +308,8 @@ function WonStatus({ position }: { position: PortfolioPosition }) {
           <Button variant="accent" size="sm" onClick={onClaim} disabled={pending}>
             {pending ? 'Claiming…' : 'Claim'}
           </Button>
+        ) : !isOnChainBet ? (
+          <span className="text-xs text-faint">Off-chain bet — paid out automatically</span>
         ) : (
           <span className="text-xs text-faint">
             {!programReady || !marketReady ? 'On-chain market unavailable' : 'Nothing to claim'}

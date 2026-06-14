@@ -7,7 +7,7 @@
 import { Router } from 'express';
 import { Types } from 'mongoose';
 import { z } from 'zod';
-import type { CreatePhotoBody } from '../contract';
+import type { CreatePhotoBody, DeletePhotoBody } from '../contract';
 import { PhotoModel, photoToDTO } from '../models/Photo';
 import { ChallengeModel } from '../models/Challenge';
 import { MetricModel } from '../models/Metric';
@@ -120,6 +120,35 @@ photosRouter.post(
         console.warn('[photos] oracle review trigger failed:', e),
       );
     }
+  }),
+);
+
+// DELETE /api/photos/:id — author-only delete (body { wallet }).
+const deletePhotoSchema: z.ZodType<DeletePhotoBody> = z.object({ wallet: z.string().min(1) });
+photosRouter.delete(
+  '/:id',
+  validateBody(deletePhotoSchema),
+  asyncHandler(async (req, res) => {
+    const _id = assertObjectId(req.params.id, 'photo');
+    const { wallet } = req.body as DeletePhotoBody;
+
+    const photo = await PhotoModel.findById(_id);
+    if (!photo) throw new HttpError(404, 'Post not found');
+    if (!photo.authorWallet || photo.authorWallet !== wallet) {
+      throw new HttpError(403, 'Only the author can delete this post');
+    }
+
+    // Clean up GridFS bytes if the media was stored there.
+    if (photo.gridFsId) {
+      try {
+        await getBucket().delete(photo.gridFsId as Types.ObjectId);
+      } catch {
+        /* bytes already gone — non-fatal */
+      }
+    }
+    await photo.deleteOne();
+
+    res.json({ ok: true, id: req.params.id });
   }),
 );
 

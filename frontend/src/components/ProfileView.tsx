@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { Trash2 } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { api } from '@/lib/api';
 import { formatSol, shortWallet } from '@/lib/format';
@@ -204,7 +205,7 @@ export function ProfileView({ wallet }: { wallet: string }) {
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-px bg-line border border-line mt-5">
               {posts.map((post) => (
-                <PostThumb key={post.photo.id} post={post} />
+                <PostThumb key={post.photo.id} post={post} owner={isOwn} ownerWallet={wallet} />
               ))}
             </div>
           )
@@ -263,42 +264,74 @@ function LineGroup({
   );
 }
 
-function PostThumb({ post }: { post: FeedPost }) {
+function PostThumb({ post, owner, ownerWallet }: { post: FeedPost; owner?: boolean; ownerWallet?: string }) {
   const { photo, challenge, likeCount } = post;
-  // Line-attached posts link to the line; standalone posts aren't clickable-through.
-  const Wrapper = challenge
-    ? ({ children }: { children: React.ReactNode }) => (
-        <Link href={`/challenge/${challenge.id}`} className="group relative block bg-paper-2 aspect-square overflow-hidden">
-          {children}
-        </Link>
-      )
-    : ({ children }: { children: React.ReactNode }) => (
-        <div className="group relative block bg-paper-2 aspect-square overflow-hidden">{children}</div>
-      );
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
 
-  return (
-    <Wrapper>
-      {isVideo(photo) ? (
-        /* eslint-disable-next-line jsx-a11y/media-has-caption */
-        <video src={mediaSrc(photo)} muted playsInline preload="metadata" className="block w-full h-full object-cover bg-ink" />
-      ) : (
-        /* eslint-disable-next-line @next/next/no-img-element */
-        <img src={mediaSrc(photo)} alt={photo.caption || 'Post'} className="block w-full h-full object-cover" />
-      )}
+  async function onDelete(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!ownerWallet || busy) return;
+    if (!window.confirm('Delete this post? This cannot be undone.')) return;
+    setBusy(true);
+    try {
+      await api.deletePost(photo.id, ownerWallet);
+      await queryClient.invalidateQueries({ queryKey: ['profile', ownerWallet] });
+    } catch {
+      /* leave the thumb; a refetch will reconcile */
+    } finally {
+      setBusy(false);
+    }
+  }
 
+  const media = isVideo(photo) ? (
+    /* eslint-disable-next-line jsx-a11y/media-has-caption */
+    <video src={mediaSrc(photo)} muted playsInline preload="metadata" className="block w-full h-full object-cover bg-ink" />
+  ) : (
+    /* eslint-disable-next-line @next/next/no-img-element */
+    <img src={mediaSrc(photo)} alt={photo.caption || 'Post'} className="block w-full h-full object-cover" />
+  );
+
+  const inner = (
+    <>
+      {media}
       {/* Corner tags */}
       <div className="absolute top-0 left-0 m-1.5 flex gap-1.5">
         {photo.isFinal && <Tag tone="accent" solid>Final</Tag>}
         {isVideo(photo) && <Tag tone="ink" solid>Video</Tag>}
         {challenge && <Tag tone="muted" solid>Line</Tag>}
       </div>
-
       {/* Like overlay — appears on hover */}
       <div className="absolute inset-0 bg-ink/70 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
         <span className="num text-paper text-lg">
           {likeCount} <span className="label text-paper tracking-normal">like{likeCount === 1 ? '' : 's'}</span>
         </span>
       </div>
-    </Wrapper>
+    </>
+  );
+
+  return (
+    <div className="group relative bg-paper-2 aspect-square overflow-hidden">
+      {challenge ? (
+        <Link href={`/challenge/${challenge.id}`} className="block w-full h-full">{inner}</Link>
+      ) : (
+        <div className="block w-full h-full">{inner}</div>
+      )}
+
+      {/* Owner-only delete */}
+      {owner && (
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={busy}
+          aria-label="Delete post"
+          title="Delete post"
+          className="absolute top-1.5 right-1.5 z-10 inline-flex items-center justify-center h-7 w-7 bg-ink/80 text-paper border border-paper/30 opacity-0 group-hover:opacity-100 hover:bg-no transition disabled:opacity-50"
+        >
+          <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+        </button>
+      )}
+    </div>
   );
 }

@@ -338,6 +338,11 @@ export interface CreatePhotoBody {
   isFinal?: boolean;
 }
 
+/** Delete a post — only the author may delete (wallet must match authorWallet). */
+export interface DeletePhotoBody {
+  wallet: string;
+}
+
 /** Mirror a confirmed on-chain bet into MongoDB (idempotent on txSig). */
 export interface CreateBetBody {
   challengeId: string;
@@ -633,6 +638,7 @@ export const API_ROUTES = {
   // photos
   listPhotos: 'GET /api/challenges/:id/photos',
   createPhoto: 'POST /api/photos',
+  deletePhoto: 'DELETE /api/photos/:id', // body { wallet } — author only
   getPhotoImage: 'GET /api/photos/:id/image', // serves GridFS bytes
   // bets
   listBets: 'GET /api/challenges/:id/bets',

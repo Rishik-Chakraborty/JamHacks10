@@ -12,7 +12,7 @@ export default function HomePage() {
           Challenge the influencers. <span className="text-accent">Bet on whether they deliver.</span>
         </h1>
         <p className="text-lg text-ink-2 mt-6 max-w-2xl leading-relaxed">
-          the gainsXchange turns fitness call-outs into live markets. Challenge an influencer to a goal,
+          The GainsXChange turns fitness call-outs into live markets. Challenge an influencer to a goal,
           seed the first bet, and let the crowd stake SOL on YES or NO. The influencer posts proof, an AI
           judge rules, and the winners take the pot — the influencer never bets, they just earn the cut.
         </p>

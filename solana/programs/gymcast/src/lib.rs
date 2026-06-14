@@ -26,8 +26,10 @@ pub const SIDE_NO: u8 = 1;
 /// Max slug length used as a PDA seed.
 pub const MAX_SLUG_LEN: usize = 32;
 
-/// Bets lock this many seconds before the deadline (12h).
-pub const BET_LOCK_SECONDS: i64 = 12 * 60 * 60;
+/// Bets lock this many seconds before the deadline.
+/// DEMO VALUE: 60s so a full create→bet→resolve→claim loop runs in minutes.
+/// Production value is `12 * 60 * 60` (12h).
+pub const BET_LOCK_SECONDS: i64 = 60;
 /// Basis-points denominator (10000 = 100%).
 pub const BPS_DENOM: u128 = 10_000;
 

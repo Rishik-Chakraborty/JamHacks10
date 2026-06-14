@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useWallet } from '@solana/wallet-adapter-react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ChallengeDetail, BetSide } from '@/types/contract';
 import { api } from '@/lib/api';
@@ -25,8 +26,12 @@ function SettleRow({ label, value, tone }: { label: string; value: string; tone?
  */
 export function ResolutionPanel({ challenge }: { challenge: ChallengeDetail }) {
   const queryClient = useQueryClient();
+  const { publicKey } = useWallet();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Manual settle is an oracle/admin action — only the configured authority wallet.
+  const isAdmin = !!publicKey && publicKey.toBase58() === process.env.NEXT_PUBLIC_ORACLE_AUTHORITY;
 
   const { status, verdict, proposedOutcome, settlement } = challenge;
   if (status !== 'under_review' && status !== 'resolved' && status !== 'refunded') return null;
@@ -110,18 +115,28 @@ export function ResolutionPanel({ challenge }: { challenge: ChallengeDetail }) {
             </div>
           )}
 
-          {/* Manual settle for a low-confidence verdict held under review. */}
+          {/* Low-confidence verdict held under review. Manual settle is admin-only. */}
           {status === 'under_review' && (
             <div className="mt-3">
-              <p className="text-xs text-faint mb-2">Low-confidence verdict — settle the outcome manually.</p>
-              <div className="flex items-center gap-3">
-                <Button type="button" variant="yes" size="sm" onClick={() => settle('yes')} disabled={busy !== null}>
-                  {busy === 'yes' ? 'Settling…' : 'Settle YES'}
-                </Button>
-                <Button type="button" variant="no" size="sm" onClick={() => settle('no')} disabled={busy !== null}>
-                  {busy === 'no' ? 'Settling…' : 'Settle NO'}
-                </Button>
-              </div>
+              {isAdmin ? (
+                <>
+                  <p className="text-xs text-faint mb-2">
+                    Low-confidence verdict — settle manually (oracle authority).
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <Button type="button" variant="yes" size="sm" onClick={() => settle('yes')} disabled={busy !== null}>
+                      {busy === 'yes' ? 'Settling…' : 'Settle YES'}
+                    </Button>
+                    <Button type="button" variant="no" size="sm" onClick={() => settle('no')} disabled={busy !== null}>
+                      {busy === 'no' ? 'Settling…' : 'Settle NO'}
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-ink-2">
+                  The verdict was low-confidence — held for the oracle to review and settle.
+                </p>
+              )}
             </div>
           )}
         </>

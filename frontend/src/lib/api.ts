@@ -82,6 +82,8 @@ export const api = {
   // photos
   listPhotos: (challengeId: string) => request<Photo[]>(`/challenges/${challengeId}/photos`),
   createPhoto: (body: CreatePhotoBody) => request<Photo>('/photos', { method: 'POST', body: JSON.stringify(body) }),
+  deletePost: (id: string, wallet: string) =>
+    request<{ ok: boolean; id: string }>(`/photos/${id}`, { method: 'DELETE', body: JSON.stringify({ wallet }) }),
 
   // bets
   listBets: (challengeId: string) => request<Bet[]>(`/challenges/${challengeId}/bets`),
