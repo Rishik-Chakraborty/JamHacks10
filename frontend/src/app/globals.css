@@ -113,6 +113,60 @@ body {
   }
 }
 
+/* AI oracle "analyzing" state: an indeterminate scan bar sweeping a track
+   (editorial — a moving block, not a glowing spinner) plus a faint surface sweep. */
+.oracle-bar > span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  background: var(--color-accent);
+  animation: oracle-scan 1.2s ease-in-out infinite;
+}
+@keyframes oracle-scan {
+  0% {
+    left: -42%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+.oracle-sweep {
+  position: relative;
+  overflow: hidden;
+}
+.oracle-sweep::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--color-accent) 16%, transparent),
+    transparent
+  );
+  transform: translateX(-100%);
+  animation: oracle-pan 1.6s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes oracle-pan {
+  to {
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .oracle-bar > span {
+    animation: none;
+    left: 0;
+    width: 100%;
+    opacity: 0.5;
+  }
+  .oracle-sweep::after {
+    animation: none;
+    display: none;
+  }
+}
+
 /* --- Wallet-adapter button: override the default purple, make it editorial. --- */
 .wallet-adapter-button,
 .wallet-adapter-button-trigger {

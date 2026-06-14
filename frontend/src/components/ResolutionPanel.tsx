@@ -15,12 +15,70 @@ function SettleRow({ label, value, tone }: { label: string; value: string; tone?
 }
 
 /**
+ * Animated "the oracle is judging" state. Shows while the final proof has been
+ * submitted but no verdict has landed yet — Gemini and GPT-4o are racing in
+ * parallel (first valid response wins; 5s hard cap → fallback). An indeterminate
+ * scan bar per model conveys "loading" without faking real progress.
+ */
+function OracleAnalyzing() {
+  return (
+    <div className="oracle-sweep border border-ink bg-paper-2 p-3">
+      <div className="flex items-center justify-between">
+        <span className="label text-ink inline-flex items-center gap-2">
+          <span className="live-tick" />
+          AI Trusted Oracle
+        </span>
+        <span className="num text-xs text-muted">analyzing proof…</span>
+      </div>
+      <div className="mt-3 space-y-2.5">
+        {['Gemini 2.5 Flash', 'GPT-4o vision'].map((model) => (
+          <div key={model}>
+            <div className="flex items-center justify-between">
+              <span className="num text-xs text-ink-2">{model}</span>
+              <span className="num text-[0.65rem] text-faint">racing</span>
+            </div>
+            <div className="oracle-bar relative mt-1 h-1.5 overflow-hidden bg-line">
+              <span />
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-muted mt-3">
+        Fastest valid verdict wins — settling the moment a model responds.
+      </p>
+    </div>
+  );
+}
+
+/**
  * Resolution UI: shows the AI Trusted Oracle verdict + settlement. A verdict
  * settles automatically (immediately on the oracle's call, or at the deadline for
- * a deferred line) — there is no manual settle path.
+ * a deferred line) — there is no manual settle path. While a final proof is in but
+ * no verdict has landed, an animated "analyzing" state shows the models racing.
  */
 export function ResolutionPanel({ challenge }: { challenge: ChallengeDetail }) {
   const { status, verdict, proposedOutcome, settlement } = challenge;
+
+  // "Judging" window: a final proof exists and we're not yet settled/refunded and
+  // no verdict has come back. Covers the brief `active`→`under_review` gap right
+  // after the creator submits the final photo, before the oracle responds.
+  const hasFinalProof = challenge.photos?.some((p) => p.isFinal) ?? false;
+  const judging =
+    !verdict && status !== 'resolved' && status !== 'refunded' && (status === 'under_review' || hasFinalProof);
+
+  if (judging) {
+    return (
+      <Panel className="p-4">
+        <div className="flex items-center justify-between">
+          <h3 className="display text-xl text-ink">Resolution</h3>
+          <Tag tone="ink" solid>Judging</Tag>
+        </div>
+        <div className="rule-ink mt-2 pt-3" />
+        <OracleAnalyzing />
+      </Panel>
+    );
+  }
+
   if (status !== 'under_review' && status !== 'resolved' && status !== 'refunded') return null;
 
   return (

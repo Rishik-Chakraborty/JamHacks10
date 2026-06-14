@@ -44,6 +44,21 @@ export function ChallengeDetail({ id }: { id: string }) {
   const { data, isLoading, isError, error, refetch } = useQuery<ChallengeDetailType>({
     queryKey,
     queryFn: () => api.getChallenge(id, wallet),
+    // While the oracle is judging a freshly-submitted final proof, poll until the
+    // verdict/settlement lands — the resolution is async server-side and isn't
+    // pushed over the socket, so without this the UI would sit on the animated
+    // "analyzing" state until a manual refresh.
+    refetchInterval: (query) => {
+      const c = query.state.data;
+      if (!c) return false;
+      const hasFinalProof = c.photos?.some((p) => p.isFinal) ?? false;
+      const judging =
+        !c.verdict &&
+        c.status !== 'resolved' &&
+        c.status !== 'refunded' &&
+        (c.status === 'under_review' || hasFinalProof);
+      return judging ? 1500 : false;
+    },
   });
 
   // Live hype/odds updates merged into the cached challenge.
