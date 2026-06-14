@@ -8,14 +8,35 @@ exports.challengeToDTO = challengeToDTO;
  */
 const mongoose_1 = require("mongoose");
 const challengeSchema = new mongoose_1.Schema({
+    /** The influencer / subject of the line. */
     creatorWallet: { type: String, required: true, index: true },
+    /** Who proposed the line (the challenger). */
+    challengerWallet: { type: String, index: true },
     title: { type: String, required: true },
     goalText: { type: String, required: true },
     successCriteria: { type: String, required: true },
-    metricType: { type: String, enum: ['weight', 'bench', 'visual'], required: true },
+    /** Optional unit for the numeric progress metric (e.g. "kg", "reps"). */
+    metricUnit: { type: String },
+    /** Pre-made template id; absent = AI-approved custom goal. */
+    templateId: { type: String },
     startDate: { type: Date, required: true },
     deadline: { type: Date, required: true },
-    status: { type: String, enum: ['active', 'resolved'], default: 'active' },
+    status: {
+        type: String,
+        enum: ['pending_accept', 'active', 'under_review', 'disputed', 'resolved', 'refunded'],
+        default: 'pending_accept',
+    },
+    /** Influencer must accept before this; else the line refunds. */
+    acceptDeadline: { type: Date },
+    /** Bets close at this time — equal to the deadline (betting stays open until then). */
+    betLockAt: { type: Date },
+    /** Fee split (basis points) applied at resolution. */
+    creatorFeeBps: { type: Number },
+    platformFeeBps: { type: Number },
+    /** Trusted-oracle verdict + proposed outcome + dispute window (resolution pipeline). */
+    verdict: { type: mongoose_1.Schema.Types.Mixed },
+    proposedOutcome: { type: String, enum: ['yes', 'no', null], default: null },
+    disputeWindowEndsAt: { type: Date },
     // On-chain references (populated after initialize_market)
     marketPda: { type: String },
     vaultPda: { type: String },
@@ -30,6 +51,8 @@ const challengeSchema = new mongoose_1.Schema({
     streak: { type: Number, default: 0 },
     misses: { type: Number, default: 0 },
     lastPostAt: { type: Date },
+    /** Wallets that liked this line. */
+    likes: { type: [String], default: [] },
 }, { timestamps: { createdAt: true, updatedAt: false }, collection: 'challenges' });
 // Fast listing/filtering of open markets nearing their deadline.
 challengeSchema.index({ status: 1, deadline: 1 });
@@ -40,13 +63,22 @@ function challengeToDTO(doc) {
     return {
         id: doc._id.toString(),
         creatorWallet: doc.creatorWallet,
+        challengerWallet: doc.challengerWallet ?? undefined,
         title: doc.title,
         goalText: doc.goalText,
         successCriteria: doc.successCriteria,
-        metricType: doc.metricType,
+        metricUnit: doc.metricUnit ?? undefined,
+        templateId: doc.templateId ?? undefined,
         startDate: doc.startDate.toISOString(),
         deadline: doc.deadline.toISOString(),
         status: doc.status,
+        acceptDeadline: doc.acceptDeadline ? doc.acceptDeadline.toISOString() : undefined,
+        betLockAt: doc.betLockAt ? doc.betLockAt.toISOString() : undefined,
+        creatorFeeBps: doc.creatorFeeBps ?? undefined,
+        platformFeeBps: doc.platformFeeBps ?? undefined,
+        verdict: doc.verdict ?? undefined,
+        proposedOutcome: (doc.proposedOutcome ?? null),
+        disputeWindowEndsAt: doc.disputeWindowEndsAt ? doc.disputeWindowEndsAt.toISOString() : undefined,
         marketPda: doc.marketPda ?? undefined,
         vaultPda: doc.vaultPda ?? undefined,
         programId: doc.programId ?? undefined,
@@ -58,6 +90,7 @@ function challengeToDTO(doc) {
         streak: doc.streak,
         misses: doc.misses,
         lastPostAt,
+        likeCount: (doc.likes ?? []).length,
         createdAt: doc.get('createdAt').toISOString(),
     };
 }

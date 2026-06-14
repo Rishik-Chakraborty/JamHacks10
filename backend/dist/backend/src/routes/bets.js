@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.challengeBetsRouter = exports.betsRouter = void 0;
+exports.userPositionsRouter = exports.challengeBetsRouter = exports.betsRouter = void 0;
 /**
  * Bets router — the on-chain mirror.
  *  POST /api/bets                 — idempotent upsert on txSig; bumps parent pools + impliedYes
@@ -11,11 +11,14 @@ const mongoose_1 = require("mongoose");
 const zod_1 = require("zod");
 const Bet_1 = require("../models/Bet");
 const Challenge_1 = require("../models/Challenge");
+const payouts_1 = require("../services/payouts");
 const validate_1 = require("../middleware/validate");
 const error_1 = require("../middleware/error");
 exports.betsRouter = (0, express_1.Router)();
 /** Mounted under /api/challenges for the per-challenge bet list route. */
 exports.challengeBetsRouter = (0, express_1.Router)({ mergeParams: true });
+/** Mounted under /api/users for a bettor's cross-market positions. */
+exports.userPositionsRouter = (0, express_1.Router)({ mergeParams: true });
 const createBetSchema = zod_1.z.object({
     challengeId: zod_1.z.string().min(1),
     bettorWallet: zod_1.z.string().min(1),
@@ -36,6 +39,21 @@ exports.betsRouter.post('/', (0, validate_1.validateBody)(createBetSchema), (0, 
     const challenge = await Challenge_1.ChallengeModel.findById(challengeId);
     if (!challenge)
         throw new error_1.HttpError(404, 'Challenge not found');
+    // --- Line-integrity guards (defense-in-depth; UI enforces these too) ------
+    if (challenge.status !== 'active') {
+        const msg = challenge.status === 'pending_accept'
+            ? "This line is still awaiting the influencer's acceptance"
+            : challenge.status === 'refunded'
+                ? 'This line was refunded'
+                : 'Betting is closed for this line';
+        throw new error_1.HttpError(409, msg);
+    }
+    if (body.bettorWallet === challenge.creatorWallet) {
+        throw new error_1.HttpError(403, "The influencer can't bet on their own line");
+    }
+    if (challenge.betLockAt && Date.now() >= challenge.betLockAt.getTime()) {
+        throw new error_1.HttpError(409, 'Betting is closed — the deadline has passed');
+    }
     // Was this tx already mirrored? Idempotency guard before mutating pools.
     const existing = await Bet_1.BetModel.findOne({ txSig: body.txSig });
     if (existing) {
@@ -80,4 +98,30 @@ exports.challengeBetsRouter.get('/:id/bets', (0, validate_1.asyncHandler)(async 
     const challengeId = assertObjectId(req.params.id, 'challenge');
     const docs = await Bet_1.BetModel.find({ challengeId }).sort({ createdAt: -1 }).limit(100);
     res.json(docs.map(Bet_1.betToDTO));
+}));
+// GET /api/users/:wallet/positions — every bet a wallet holds, joined with its market.
+exports.userPositionsRouter.get('/:wallet/positions', (0, validate_1.asyncHandler)(async (req, res) => {
+    const wallet = req.params.wallet;
+    const bets = await Bet_1.BetModel.find({ bettorWallet: wallet }).sort({ createdAt: -1 }).limit(300);
+    // Batch-load the challenges these bets reference.
+    const challengeIds = [...new Set(bets.map((b) => b.challengeId.toString()))];
+    const challenges = await Challenge_1.ChallengeModel.find({ _id: { $in: challengeIds } });
+    const byId = new Map(challenges.map((c) => [c._id.toString(), c]));
+    const positions = [];
+    for (const bet of bets) {
+        const challenge = byId.get(bet.challengeId.toString());
+        if (!challenge)
+            continue;
+        const cDto = (0, Challenge_1.challengeToDTO)(challenge);
+        const bDto = (0, Bet_1.betToDTO)(bet);
+        const payout = (0, payouts_1.computeBetPayout)(cDto, bDto);
+        positions.push({
+            bet: bDto,
+            challenge: cDto,
+            payoutLamports: payout?.payoutLamports,
+            won: payout?.won,
+            refunded: payout?.refunded,
+        });
+    }
+    res.json(positions);
 }));

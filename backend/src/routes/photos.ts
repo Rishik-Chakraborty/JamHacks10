@@ -138,10 +138,20 @@ photosRouter.delete(
     if (photo.authorWallet !== wallet) {
       throw new HttpError(403, 'You can only delete your own posts');
     }
+    // A final-proof photo is the evidence the AI oracle judges and the no-show
+    // sweep checks — deleting it would strand resolution / mis-fire a refund.
+    if (photo.isFinal && photo.challengeId) {
+      throw new HttpError(409, "You can't delete the final proof of a line.");
+    }
 
-    // Drop the GridFS bytes first; if that fails the doc stays so we don't orphan it.
+    // Drop the GridFS bytes first so we don't orphan them. Tolerate already-missing
+    // bytes (e.g. a prior half-delete) so a post can never become undeletable.
     if (photo.gridFsId) {
-      await getBucket().delete(photo.gridFsId as Types.ObjectId);
+      try {
+        await getBucket().delete(photo.gridFsId as Types.ObjectId);
+      } catch (err) {
+        if (!/file not found/i.test((err as Error).message)) throw err;
+      }
     }
     await photo.deleteOne();
 

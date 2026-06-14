@@ -39,8 +39,6 @@ export const LAMPORTS_PER_SOL = 1_000_000_000;
 /** AI verdict confidence below this routes to manual override before resolve. */
 export const MIN_CONFIDENCE = 0.6;
 
-/** Bets lock this many hours before the deadline (anti last-minute manipulation). */
-export const BET_LOCK_HOURS = 12;
 /** Influencer must accept a line within this many hours, else it refunds. */
 export const ACCEPT_WINDOW_HOURS = 48;
 /** After the oracle verdict, disputes are open for this many hours before auto-finalize. */
@@ -104,7 +102,7 @@ export interface Challenge {
 
   /** Influencer must accept before this time, else the line refunds. */
   acceptDeadline?: string; // ISO
-  /** Bets lock at this time (deadline − BET_LOCK_HOURS). */
+  /** Bets close at this time — equal to the deadline (betting stays open until then). */
   betLockAt?: string; // ISO
   /** Fee split applied at resolution (basis points of the pool). */
   creatorFeeBps?: number;

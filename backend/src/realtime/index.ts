@@ -119,7 +119,9 @@ export async function initRealtime(_io: SocketServer): Promise<void> {
           if (!bet) return;
           emitTicker({
             kind: 'bet',
-            challengeId: bet.challengeId ?? '',
+            // fullDocument fields are raw BSON — challengeId is an ObjectId; stringify
+            // it so the socket payload carries the hex id the client links on.
+            challengeId: bet.challengeId ? String(bet.challengeId) : '',
             wallet: bet.bettorWallet,
             side: bet.side,
             amountLamports: bet.amountLamports,
@@ -144,7 +146,7 @@ export async function initRealtime(_io: SocketServer): Promise<void> {
           if (!photo) return;
           emitTicker({
             kind: 'photo',
-            challengeId: photo.challengeId ?? '',
+            challengeId: photo.challengeId ? String(photo.challengeId) : '',
             message: photo.isFinal ? 'Final photo posted' : 'New progress photo',
             at: new Date().toISOString(),
           });

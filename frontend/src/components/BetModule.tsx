@@ -108,7 +108,7 @@ export function BetModule({ challenge, odds }: Props) {
       {statusMsg ? (
         <p className="text-sm text-muted mt-3">{statusMsg}</p>
       ) : locked ? (
-        <p className="text-sm text-muted mt-3">Betting is locked — within 12h of the deadline.</p>
+        <p className="text-sm text-muted mt-3">Betting is closed — the deadline has passed.</p>
       ) : isInfluencer ? (
         <p className="text-sm text-muted mt-3">
           You&rsquo;re the influencer on this line — you can&rsquo;t bet on yourself.

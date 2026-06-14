@@ -1,144 +1,236 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.evaluateGoal = evaluateGoal;
 /**
- * AI oracle — evaluates the final challenge photo against the success criteria
- * and returns a structured {@link OracleVerdict}. This is the GenAI core of
- * GymCast: it is the authority that decides market resolution.
+ * AI oracle — evaluates the final challenge photo against the success criteria.
  *
- * - Primary judge: OpenAI vision model (`env.OPENAI_VISION_MODEL`) via Structured
- *   Outputs (json_schema), so the model is *forced* to return the exact verdict
- *   shape — no brittle free-text parsing.
- * - Optional ensemble: a second opinion from a self-hosted Vultr GPU model
- *   (`env.VULTR_VISION_URL`). If the two judges disagree, we force manual review
- *   and discount confidence. No-op when the flag is unset.
+ * Primary judge: Google Gemini 2.5 Flash vision model via the Google Generative
+ * AI SDK, using structured JSON output (responseSchema) so the model is forced
+ * to return the exact verdict shape — no brittle free-text parsing.
+ *
+ * Confidence calibration: an XGBoost-style gradient boosting model (trained on
+ * historical / synthetic evaluations) blends with Gemini's raw confidence to
+ * produce a calibrated final score. This is the GenAI + ML ensemble that makes
+ * GymCast's oracle defensible to bettors and judges.
+ *
+ * Optional ensemble: a second opinion from a self-hosted Vultr GPU model
+ * (`env.VULTR_VISION_URL`). On disagreement we force manual review. No-op when
+ * the flag is unset.
  */
-const openai_1 = __importDefault(require("openai"));
-const zod_1 = require("openai/helpers/zod");
-const zod_2 = require("zod");
+const generative_ai_1 = require("@google/generative-ai");
+const zod_1 = require("zod");
 const env_1 = require("../../config/env");
 const contract_1 = require("../../contract");
 const prompts_1 = require("./prompts");
-/**
- * Zod schema mirroring {@link OracleVerdict} minus `needsManualReview`, which we
- * compute server-side (the model never decides whether a human is needed).
- * Drives OpenAI Structured Outputs so the model MUST return this exact shape.
- */
-const verdictSchema = zod_2.z
-    .object({
-    met: zod_2.z.boolean().describe('Whether the success criteria is clearly met by the photo.'),
-    confidence: zod_2.z
+const xgboost_inference_1 = require("./xgboost-inference");
+/** The enhanced verdict Gemini returns (superset of OracleVerdict). */
+const geminiVerdictSchema = zod_1.z.object({
+    met: zod_1.z.boolean().describe('Whether the success criteria is clearly met by the proof.'),
+    confidence: zod_1.z
         .number()
         .min(0)
         .max(1)
         .describe('Probability in [0,1] that the `met` verdict is correct. Be conservative.'),
-    reasoning: zod_2.z
-        .string()
-        .describe('Brief justification tied to the observed evidence.'),
-    observedEvidence: zod_2.z
-        .array(zod_2.z.string())
-        .describe('Concrete visual facts actually seen in the photo and used to decide.'),
-})
-    .strict();
+    reasoning: zod_1.z.string().describe('Brief justification tied to the observed evidence.'),
+    observedEvidence: zod_1.z
+        .array(zod_1.z.string())
+        .describe('Concrete visual facts actually seen in the photo(s) and used to decide.'),
+    photoQuality: zod_1.z
+        .number()
+        .min(0)
+        .max(1)
+        .describe('Photo clarity and unambiguity score: 1.0 = crystal clear, 0.0 = illegible/unusable.'),
+    effortLevel: zod_1.z
+        .enum(['low', 'medium', 'high'])
+        .describe('Subjective effort level visible in the proof.'),
+    goalCompletionPercent: zod_1.z
+        .number()
+        .min(0)
+        .max(100)
+        .describe('Estimated percentage of the goal criteria visually completed (0-100).'),
+    repCount: zod_1.z
+        .number()
+        .int()
+        .min(0)
+        .describe('Number of distinct exercise repetitions (e.g. squats, push-ups, pull-ups) counted across all frames. ' +
+        'Set to 0 if the proof is a photo (not video) or if the criteria do not involve rep counting.'),
+});
+// ─── Gemini client ────────────────────────────────────────────────────────────
 let cachedClient = null;
-function client() {
+function getClient() {
     if (!cachedClient)
-        cachedClient = new openai_1.default({ apiKey: env_1.env.OPENAI_API_KEY });
+        cachedClient = new generative_ai_1.GoogleGenerativeAI(env_1.env.GOOGLE_VISION_API_KEY);
     return cachedClient;
 }
-/** Build a data URL for the vision message without ever logging the payload. */
-function toDataUrl(imageBase64, mimeType) {
-    // Accept either a raw base64 string or an already-formed data URL.
-    if (imageBase64.startsWith('data:'))
-        return imageBase64;
-    return `data:${mimeType};base64,${imageBase64}`;
+/** Strip `data:<mime>;base64,` prefix so Gemini gets raw base64 only. */
+function toRawBase64(imageBase64) {
+    const match = imageBase64.match(/^data:[^;]+;base64,(.+)$/s);
+    return match ? match[1] : imageBase64;
 }
 function clamp01(n) {
     if (Number.isNaN(n))
         return 0;
     return Math.max(0, Math.min(1, n));
 }
+// ─── Gemini vision call ───────────────────────────────────────────────────────
+async function callGemini(params) {
+    const gemini = getClient();
+    const model = gemini.getGenerativeModel({
+        model: env_1.env.GOOGLE_VISION_MODEL,
+        systemInstruction: prompts_1.ORACLE_SYSTEM_PROMPT,
+        generationConfig: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+                type: generative_ai_1.SchemaType.OBJECT,
+                properties: {
+                    met: {
+                        type: generative_ai_1.SchemaType.BOOLEAN,
+                        description: 'Whether the success criteria is clearly met.',
+                    },
+                    confidence: {
+                        type: generative_ai_1.SchemaType.NUMBER,
+                        description: 'Probability [0,1] that the verdict is correct.',
+                    },
+                    reasoning: {
+                        type: generative_ai_1.SchemaType.STRING,
+                        description: 'Brief justification tied to observed evidence.',
+                    },
+                    observedEvidence: {
+                        type: generative_ai_1.SchemaType.ARRAY,
+                        items: { type: generative_ai_1.SchemaType.STRING },
+                        description: 'Concrete visual facts used to decide.',
+                    },
+                    photoQuality: {
+                        type: generative_ai_1.SchemaType.NUMBER,
+                        description: 'Photo clarity score [0,1].',
+                    },
+                    effortLevel: {
+                        type: generative_ai_1.SchemaType.STRING,
+                        description: 'Visible effort: low | medium | high',
+                    },
+                    goalCompletionPercent: {
+                        type: generative_ai_1.SchemaType.NUMBER,
+                        description: 'Estimated completion percentage [0,100].',
+                    },
+                    repCount: {
+                        type: generative_ai_1.SchemaType.INTEGER,
+                        description: 'Number of exercise reps counted across all frames. 0 if photo or no rep criteria.',
+                    },
+                },
+                required: [
+                    'met',
+                    'confidence',
+                    'reasoning',
+                    'observedEvidence',
+                    'photoQuality',
+                    'effortLevel',
+                    'goalCompletionPercent',
+                    'repCount',
+                ],
+            },
+        },
+    });
+    const userText = (0, prompts_1.buildOracleUserText)(params.goalText, params.successCriteria, params.images.length);
+    const parts = [
+        { text: userText },
+        ...params.images.map((img) => ({
+            inlineData: {
+                mimeType: img.mimeType,
+                data: toRawBase64(img.base64),
+            },
+        })),
+    ];
+    const result = await model.generateContent(parts);
+    const text = result.response.text();
+    let raw;
+    try {
+        raw = JSON.parse(text);
+    }
+    catch {
+        throw new Error(`Gemini returned non-JSON response: ${text.slice(0, 200)}`);
+    }
+    const parsed = geminiVerdictSchema.safeParse(raw);
+    if (!parsed.success) {
+        throw new Error(`Gemini verdict schema mismatch: ${parsed.error.message}. Raw: ${text.slice(0, 300)}`);
+    }
+    return parsed.data;
+}
+// ─── Main export ──────────────────────────────────────────────────────────────
 /**
  * Evaluate the final photo against the goal's success criteria.
+ *
+ * Pipeline:
+ *   1. Call Gemini 2.5 Flash (structured JSON output)
+ *   2. Feed Gemini features → XGBoost calibrator (gradient boosting)
+ *   3. Blend: 65% Gemini confidence + 35% XGBoost calibration
+ *   4. Optional: Vultr GPU second-opinion ensemble
+ *   5. Gate: confidence < MIN_CONFIDENCE → needsManualReview
  *
  * @throws if the AI oracle is not configured (`env.aiEnabled` is false).
  */
 async function evaluateGoal(params) {
     if (!env_1.env.aiEnabled) {
-        throw new Error('AI oracle not configured: set OPENAI_API_KEY to enable verdicts.');
+        throw new Error('AI oracle not configured: set GOOGLE_VISION_API_KEY to enable verdicts.');
     }
-    const dataUrl = toDataUrl(params.imageBase64, params.mimeType);
-    const completion = await client().beta.chat.completions.parse({
-        model: env_1.env.OPENAI_VISION_MODEL,
-        messages: [
-            { role: 'system', content: prompts_1.ORACLE_SYSTEM_PROMPT },
-            {
-                role: 'user',
-                content: [
-                    { type: 'text', text: (0, prompts_1.buildOracleUserText)(params.goalText, params.successCriteria) },
-                    { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
-                ],
-            },
-        ],
-        response_format: (0, zod_1.zodResponseFormat)(verdictSchema, 'oracle_verdict'),
-    });
-    const parsed = completion.choices[0]?.message.parsed;
-    if (!parsed) {
-        const refusal = completion.choices[0]?.message.refusal;
-        throw new Error(`AI oracle returned no structured verdict${refusal ? `: ${refusal}` : ''}.`);
+    if (params.images.length === 0) {
+        throw new Error('No proof images provided to the AI oracle.');
     }
+    // Step 1 — Gemini vision verdict
+    const geminiVerdict = await callGemini(params);
+    // Step 2 — XGBoost confidence calibration (sub-10ms, non-blocking on failure)
+    let xgboostResult = null;
+    try {
+        xgboostResult = await (0, xgboost_inference_1.runXGBoostInference)({
+            geminiConfidence: clamp01(geminiVerdict.confidence),
+            geminiMet: geminiVerdict.met ? 1 : 0,
+            photoQuality: clamp01(geminiVerdict.photoQuality),
+            effortLevel: geminiVerdict.effortLevel,
+            goalCompletionPercent: clamp01(geminiVerdict.goalCompletionPercent / 100) * 100,
+        });
+    }
+    catch (err) {
+        console.warn('[ai] XGBoost calibration failed (non-fatal); using Gemini confidence only.', err);
+    }
+    // Step 3 — Derive final verdict from XGBoost success probability
+    // xgboostResult.finalConfidence = P(goal achieved) [0,1] blended from Gemini + XGBoost.
+    // We convert it back to (met, confidence) for the OracleVerdict shape.
+    let finalMet;
+    let finalConfidence;
+    if (xgboostResult) {
+        const successProb = xgboostResult.finalConfidence; // P(achieved)
+        finalMet = successProb >= 0.5;
+        // confidence = how sure we are of the verdict direction
+        finalConfidence = clamp01(finalMet ? successProb : 1 - successProb);
+        if (!xgboostResult.modelAgreement) {
+            console.info(`[ai] Gemini/XGBoost disagreement — gemini=${geminiVerdict.met}, ` +
+                `xgb_P(met)=${xgboostResult.calibratedConfidence.toFixed(3)}, ` +
+                `final_met=${finalMet}, latency=${xgboostResult.latencyMs}ms`);
+        }
+    }
+    else {
+        finalMet = geminiVerdict.met;
+        finalConfidence = clamp01(geminiVerdict.confidence);
+    }
+    const repNote = geminiVerdict.repCount > 0
+        ? ` Reps counted: ${geminiVerdict.repCount}.`
+        : '';
     let verdict = {
-        met: parsed.met,
-        confidence: clamp01(parsed.confidence),
-        reasoning: parsed.reasoning,
-        observedEvidence: parsed.observedEvidence,
+        met: finalMet,
+        confidence: finalConfidence,
+        reasoning: xgboostResult
+            ? `${geminiVerdict.reasoning}${repNote} [XGBoost P(success)=${(xgboostResult.finalConfidence * 100).toFixed(0)}%, latency ${xgboostResult.latencyMs}ms]`
+            : `${geminiVerdict.reasoning}${repNote}`,
+        observedEvidence: geminiVerdict.observedEvidence,
         needsManualReview: false,
     };
-    // Optional second opinion. Only runs when the Vultr flag is configured.
+    // Step 4 — Optional Vultr GPU ensemble
     verdict = await applyEnsemble(verdict, params);
-    // Final gate: low confidence always routes to a human before any payout.
+    // Step 5 — Final gate
     verdict.needsManualReview = verdict.needsManualReview || verdict.confidence < contract_1.MIN_CONFIDENCE;
     return verdict;
 }
-/* -------------------------------------------------------------------------- */
-/* Optional Vultr GPU ensemble (second opinion)                               */
-/* -------------------------------------------------------------------------- */
-/**
- * If a self-hosted vision endpoint is configured, get a second verdict and
- * cross-check it against the primary. On disagreement we force manual review
- * and halve confidence; on agreement we leave the primary untouched. Any
- * failure of the secondary is non-fatal — the primary verdict still stands.
- */
-async function applyEnsemble(primary, params) {
-    if (!env_1.env.VULTR_VISION_URL)
-        return primary;
-    const second = await querySecondaryOracle(params);
-    if (!second)
-        return primary; // secondary unreachable/unparseable → trust primary
-    if (second.met !== primary.met) {
-        // Judges disagree on the binary outcome → never auto-resolve.
-        return {
-            ...primary,
-            confidence: clamp01(Math.min(primary.confidence, second.confidence) * 0.5),
-            reasoning: `${primary.reasoning} [Ensemble DISAGREEMENT: secondary judged met=${second.met} (conf ${second.confidence.toFixed(2)}); routed to manual review.]`,
-            needsManualReview: true,
-        };
-    }
-    // Agreement: keep the more conservative confidence, note the corroboration.
-    return {
-        ...primary,
-        confidence: clamp01(Math.min(primary.confidence, second.confidence)),
-        reasoning: `${primary.reasoning} [Ensemble agreement: secondary also judged met=${second.met}.]`,
-    };
-}
-/** Minimal shape we accept from the Vultr endpoint. */
-const secondarySchema = zod_2.z.object({
-    met: zod_2.z.boolean(),
-    confidence: zod_2.z.number(),
-});
+// ─── Vultr ensemble (unchanged, secondary non-fatal second opinion) ───────────
+const secondarySchema = zod_1.z.object({ met: zod_1.z.boolean(), confidence: zod_1.z.number() });
 async function querySecondaryOracle(params) {
     try {
         const controller = new AbortController();
@@ -149,8 +241,8 @@ async function querySecondaryOracle(params) {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({
-                    imageBase64: params.imageBase64,
-                    mimeType: params.mimeType,
+                    imageBase64: params.images[0]?.base64,
+                    mimeType: params.images[0]?.mimeType,
                     goalText: params.goalText,
                     successCriteria: params.successCriteria,
                 }),
@@ -167,7 +259,7 @@ async function querySecondaryOracle(params) {
         const json = await res.json();
         const parsed = secondarySchema.safeParse(json);
         if (!parsed.success) {
-            console.warn('[ai] Vultr ensemble returned an unparseable verdict; ignoring.');
+            console.warn('[ai] Vultr ensemble returned unparseable verdict; ignoring.');
             return null;
         }
         return { met: parsed.data.met, confidence: clamp01(parsed.data.confidence) };
@@ -176,4 +268,24 @@ async function querySecondaryOracle(params) {
         console.warn('[ai] Vultr ensemble request failed; ignoring second opinion.', err);
         return null;
     }
+}
+async function applyEnsemble(primary, params) {
+    if (!env_1.env.VULTR_VISION_URL)
+        return primary;
+    const second = await querySecondaryOracle(params);
+    if (!second)
+        return primary;
+    if (second.met !== primary.met) {
+        return {
+            ...primary,
+            confidence: clamp01(Math.min(primary.confidence, second.confidence) * 0.5),
+            reasoning: `${primary.reasoning} [Ensemble DISAGREEMENT: Vultr judged met=${second.met} (conf ${second.confidence.toFixed(2)}); routed to manual review.]`,
+            needsManualReview: true,
+        };
+    }
+    return {
+        ...primary,
+        confidence: clamp01(Math.min(primary.confidence, second.confidence)),
+        reasoning: `${primary.reasoning} [Ensemble agreement: Vultr also judged met=${second.met}.]`,
+    };
 }

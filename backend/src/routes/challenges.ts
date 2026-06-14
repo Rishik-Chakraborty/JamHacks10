@@ -23,7 +23,6 @@ import type {
   ApiError,
 } from '../contract';
 import {
-  BET_LOCK_HOURS,
   ACCEPT_WINDOW_HOURS,
   DEFAULT_CREATOR_FEE_BPS,
   DEFAULT_PLATFORM_FEE_BPS,
@@ -121,7 +120,9 @@ challengesRouter.post(
     let successCriteria = body.successCriteria;
     const isCustom = !body.templateId;
 
-    if (isCustom && env.aiEnabled) {
+    // reviewGoal() uses the OpenAI commentary model, so gate on that key — not the
+    // Gemini vision key (aiEnabled), which is for the photo oracle.
+    if (isCustom && env.commentaryEnabled) {
       let review: GoalReview | null = null;
       try {
         review = await reviewGoal({
@@ -149,8 +150,13 @@ challengesRouter.post(
 
     const deadline = new Date(body.deadline);
     const now = new Date();
-    const betLockAt = new Date(deadline.getTime() - BET_LOCK_HOURS * 3_600_000);
+    // Betting stays open until the deadline itself (no early lock window).
+    const betLockAt = deadline;
     const acceptDeadline = new Date(now.getTime() + ACCEPT_WINDOW_HOURS * 3_600_000);
+
+    if (deadline.getTime() <= now.getTime()) {
+      throw new HttpError(400, 'Deadline must be in the future.');
+    }
 
     const seedYes = body.seedSide === 'yes' ? body.seedAmountLamports : 0;
     const seedNo = body.seedSide === 'no' ? body.seedAmountLamports : 0;

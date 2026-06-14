@@ -58,7 +58,7 @@ betsRouter.post(
       throw new HttpError(403, "The influencer can't bet on their own line");
     }
     if (challenge.betLockAt && Date.now() >= challenge.betLockAt.getTime()) {
-      throw new HttpError(409, 'Betting is locked — within the final window before the deadline');
+      throw new HttpError(409, 'Betting is closed — the deadline has passed');
     }
 
     // Was this tx already mirrored? Idempotency guard before mutating pools.

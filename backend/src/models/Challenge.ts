@@ -27,7 +27,7 @@ const challengeSchema = new Schema(
     },
     /** Influencer must accept before this; else the line refunds. */
     acceptDeadline: { type: Date },
-    /** Bets lock at this time (deadline − BET_LOCK_HOURS). */
+    /** Bets close at this time — equal to the deadline (betting stays open until then). */
     betLockAt: { type: Date },
     /** Fee split (basis points) applied at resolution. */
     creatorFeeBps: { type: Number },

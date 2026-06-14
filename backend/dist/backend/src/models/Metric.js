@@ -10,7 +10,8 @@ const mongoose_1 = require("mongoose");
 const metricSchema = new mongoose_1.Schema({
     challengeId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Challenge', required: true },
     ts: { type: Date, required: true },
-    metricType: { type: String, enum: ['weight', 'bench', 'visual'], required: true },
+    /** Optional unit label carried from the challenge (e.g. "kg"). */
+    unit: { type: String },
     value: { type: Number, required: true },
 }, { collection: 'metrics' });
 // Time-series access pattern: points for a challenge ordered by timestamp.
@@ -21,7 +22,7 @@ function metricToDTO(doc) {
     return {
         challengeId: doc.challengeId.toString(),
         ts: doc.ts.toISOString(),
-        metricType: doc.metricType,
+        unit: doc.unit ?? undefined,
         value: doc.value,
     };
 }

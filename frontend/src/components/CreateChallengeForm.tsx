@@ -416,7 +416,7 @@ export function CreateChallengeForm() {
               onChange={(e) => setDeadline(e.target.value)}
               className="num w-full sm:w-72 bg-paper border border-line focus:border-ink outline-none px-3 h-11 mt-1.5 text-ink"
             />
-            <p className="text-xs text-faint mt-1.5">Bets lock 12h before this.</p>
+            <p className="text-xs text-faint mt-1.5">Bets stay open until this time.</p>
           </div>
 
           {/* Seed bet */}
@@ -494,7 +494,7 @@ function HowItWorks() {
   const steps: { n: string; head: string; body: string }[] = [
     { n: '01', head: 'Challenge an influencer', body: 'Pick who, set the goal & deadline, and seed the first bet (YES or NO).' },
     { n: '02', head: 'They accept', body: 'The line goes live only once the influencer accepts the challenge.' },
-    { n: '03', head: 'The board bets', body: 'Spectators stake SOL on YES or NO. Bets lock 12h before the deadline.' },
+    { n: '03', head: 'The board bets', body: 'Spectators stake SOL on YES or NO, right up until the deadline.' },
     { n: '04', head: 'The bell rings', body: 'The influencer posts final proof; an AI judge rules. Winners split the pot.' },
   ];
   return (

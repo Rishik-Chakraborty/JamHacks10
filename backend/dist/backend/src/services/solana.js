@@ -9,6 +9,7 @@ exports.deriveVaultPda = deriveVaultPda;
 exports.derivePositionPda = derivePositionPda;
 exports.fetchMarket = fetchMarket;
 exports.resolveMarket = resolveMarket;
+exports.refundMarket = refundMarket;
 /**
  * Solana oracle service.
  *
@@ -138,11 +139,39 @@ async function resolveMarket(challenge, outcome) {
     if (!challenge.marketPda) {
         throw new Error(`challenge ${challenge.id} has no marketPda — initialize_market must run first`);
     }
-    const { program, authority } = getClient();
+    const { program, authority, programId } = getClient();
     const marketPda = new web3_js_1.PublicKey(challenge.marketPda);
+    const vault = deriveVaultPda(marketPda, programId);
+    const influencer = new web3_js_1.PublicKey(challenge.creatorWallet); // subject — receives the creator cut
+    const platform = authority.publicKey; // platform fee recipient (the oracle authority)
     const outcomeCode = outcome === 'yes' ? contract_1.OUTCOME_YES : contract_1.OUTCOME_NO;
     const txSig = await program.methods
         .resolveMarket(outcomeCode)
+        .accounts({
+        authority: authority.publicKey,
+        market: marketPda,
+        vault,
+        influencer,
+        platform,
+        systemProgram: web3_js_1.SystemProgram.programId,
+    })
+        .signers([authority])
+        .rpc();
+    return txSig;
+}
+/**
+ * Refund a market (influencer no-show / declined) with the authority signature.
+ * Afterwards each bettor reclaims their stake via `claim_winnings`.
+ */
+async function refundMarket(challenge) {
+    assertEnabled();
+    if (!challenge.marketPda) {
+        throw new Error(`challenge ${challenge.id} has no marketPda — nothing to refund on-chain`);
+    }
+    const { program, authority } = getClient();
+    const marketPda = new web3_js_1.PublicKey(challenge.marketPda);
+    const txSig = await program.methods
+        .refundMarket()
         .accounts({
         authority: authority.publicKey,
         market: marketPda,

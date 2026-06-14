@@ -37,7 +37,9 @@ export function ChallengeDetail({ id }: { id: string }) {
   const qc = useQueryClient();
   const { publicKey } = useWallet();
   const wallet = publicKey?.toBase58();
-  const queryKey = ['challenge', id] as const;
+  // Include wallet: getChallenge returns viewer-specific fields (e.g. likedByMe),
+  // so connecting/switching wallets must trigger a refetch.
+  const queryKey = ['challenge', id, wallet ?? null] as const;
 
   const { data, isLoading, isError, error, refetch } = useQuery<ChallengeDetailType>({
     queryKey,
@@ -63,8 +65,10 @@ export function ChallengeDetail({ id }: { id: string }) {
       );
     });
     return off;
+    // queryKey is derived from id + wallet; re-subscribe when either changes so
+    // setQueryData writes to the live key.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, wallet]);
 
   if (isLoading) {
     return (
