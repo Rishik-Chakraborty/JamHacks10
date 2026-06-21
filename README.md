@@ -30,7 +30,7 @@ At the deadline, an **OpenAI vision model** automatically judges the final photo
 - **solana/** — Anchor parimutuel market program (devnet).
 - **shared/types.ts** — single source of truth for the cross-package contract.
 
-See [CLAUDE.md](./CLAUDE.md) for conventions and the build plan for the multi-agent milestone map.
+
 
 ## Quickstart
 ### Backend
